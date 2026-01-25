@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!--
+      base target="_top" is a Google Apps Script best practice.
+      It ensures links open outside the iframe if you add any later.
+    -->
+    <base target="_top">
+
+    <style>
+      /*
+        Minimal styling for MVP.
+        We’ll replace this later with a proper design system.
+      */
+      body {
+        font-family: Arial, sans-serif;
+        padding: 12px;
+      }
+
+      h3 {
+        margin-top: 0;
+      }
+
+      button {
+        display: block;
+        width: 100%;
+        margin: 8px 0;
+        padding: 8px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      #status {
+        margin-top: 12px;
+        font-size: 12px;
+        color: #555;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Sidebar title -->
+    <h3>SuperSlides</h3>
+
+    <!-- Anchor controls -->
+    <button onclick="runSetAnchor()">Set Anchor</button>
+    <button onclick="runClearAnchor()">Clear Anchor</button>
+
+    <hr>
+
+    <!-- Alignment controls -->
+    <button onclick="runAlignLeft()">Align Left</button>
+
+    <!-- Status output -->
+    <div id="status">Loading…</div>
+
+    <!--
+      Everything inside this <script> tag is JavaScript
+      that runs INSIDE the sidebar (client-side).
+    -->
+    <script>
+      /**
+       * refreshStatus()
+       *
+       * Calls the server-side getAnchorStatus() function
+       * and updates the text in the sidebar.
+       */
+      function refreshStatus() {
+        google.script.run
+          .withSuccessHandler(function (text) {
+            document.getElementById('status').innerText = text;
+          })
+          .getAnchorStatus();
+      }
+
+      /**
+       * runSetAnchor()
+       *
+       * Calls server-side setAnchor(), then refreshes status.
+       */
+      function runSetAnchor() {
+        google.script.run
+          .withSuccessHandler(refreshStatus)
+          .setAnchor();
+      }
+
+      /**
+       * runClearAnchor()
+       *
+       * Calls server-side clearAnchor(), then refreshes status.
+       */
+      function runClearAnchor() {
+        google.script.run
+          .withSuccessHandler(refreshStatus)
+          .clearAnchor();
+      }
+
+      /**
+       * runAlignLeft()
+       *
+       * Calls server-side alignLeft().
+       * No status update needed (it moves shapes).
+       */
+       function runAlignLeft() {
+  // Show immediate UI feedback so you know the click worked
+  document.getElementById('status').innerText = 'Aligning left…';
+
+  google.script.run
+    .withSuccessHandler(function (msg) {
+      // msg is whatever alignLeft() returns (we'll add that next)
+      document.getElementById('status').innerText = msg || 'Aligned.';
+      // Optional: also refresh anchor status text afterwards
+      // refreshStatus();
+    })
+    .withFailureHandler(function (err) {
+      // This is the key: it surfaces server errors to the UI
+      document.getElementById('status').innerText =
+        '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+    })
+    .alignLeft();
+}
+
+      // When the sidebar loads, immediately fetch anchor status
+      refreshStatus();
+    </script>
+  </body>
+</html>
