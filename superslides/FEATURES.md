@@ -13,13 +13,16 @@ SuperSlides is a Google Slides add-on that provides precise layout tools for ali
    - [Align Top](#align-top)
    - [Align Bottom](#align-bottom)
    - [Align Middle](#align-middle)
-2. [Anchor Management](#anchor-management)
+2. [Table-Based Alignment](#table-based-alignment)
+   - [Align in Table](#align-in-table)
+3. [Matrix Alignment](#matrix-alignment)
+4. [Anchor Management](#anchor-management)
    - [Set Anchor](#set-anchor)
    - [Clear Anchor](#clear-anchor)
    - [Anchor Status](#anchor-status)
-3. [How Anchor Resolution Works](#how-anchor-resolution-works)
-4. [API Reference](#api-reference)
-5. [Known Limitations](#known-limitations)
+5. [How Anchor Resolution Works](#how-anchor-resolution-works)
+6. [API Reference](#api-reference)
+7. [Known Limitations](#known-limitations)
 
 ---
 
@@ -235,6 +238,119 @@ All vertical centers now line up horizontally (same Y-axis).
 
 ---
 
+## Table-Based Alignment
+
+Table-based alignment features align shapes within their containing table cells. These features are useful when you have shapes placed inside table cells and want to align them relative to the cell boundaries.
+
+**How it works:**
+- SuperSlides detects which table cell contains each shape (by checking if the shape's center point is within the cell)
+- Shapes are grouped by their containing cell
+- Each group is aligned within its cell with configurable padding
+- Multiple shapes in the same cell are stacked vertically and **centered vertically** within the cell
+- **Important:** Select only the shapes you want to align, NOT the table itself
+
+### Align in Table
+
+**What it does:**  
+Aligns selected shapes within their containing table cells with a choice of left, center, or right alignment and configurable padding. Shapes are automatically centered vertically within their cells.
+
+**Visual examples:**
+
+**Left alignment (padding=10pt):**
+```
+┌─────────────┐
+│[Shape]      │  ← 10pt from left, centered vertically
+│             │
+└─────────────┘
+```
+
+**Center alignment:**
+```
+┌─────────────┐
+│   [Shape]   │  ← Centered horizontally and vertically
+│             │
+└─────────────┘
+```
+
+**Right alignment (padding=10pt):**
+```
+┌─────────────┐
+│      [Shape]│  ← 10pt from right, centered vertically
+│             │
+└─────────────┘
+```
+
+**How to use:**
+
+1. Create a table on your slide
+2. Place shapes inside table cells (shapes don't need to be perfectly positioned)
+3. Select **only the shapes** you want to align (do NOT select the table)
+4. Click **Align in Table** button in the sidebar
+5. A dialog will appear with options:
+   - **Alignment:** Choose Left, Center, or Right (radio buttons)
+   - **Padding:** Enter padding in points (default: 10)
+6. Click **Apply**
+
+**Technical details:**
+
+- Uses shape center point to determine which cell contains it
+- Tables are automatically filtered out from selection (prevents accidental table movement)
+- Shapes not contained in any cell are skipped
+- Multiple shapes in the same cell are stacked vertically and centered as a group
+- Vertical centering: `currentTop = cellTop + (cellHeight / 2) - (totalHeight / 2)`
+- Horizontal alignment:
+  - **Left:** `cellLeft + padding`
+  - **Right:** `cellLeft + cellWidth - shapeWidth - padding`
+  - **Center:** `cellLeft + (cellWidth / 2) - (shapeWidth / 2)`
+- Table dimensions calculated by summing individual column widths and row heights (handles non-uniform cells)
+
+---
+
+## Matrix Alignment
+
+**What it does:**  
+Arranges selected shapes into a grid/matrix layout with user-specified dimensions and spacing.
+
+**Visual example:**
+
+```
+BEFORE:                         AFTER (3×3 matrix):
+
+[Shape1] [Shape2] [Shape3]     [Shape1] [Shape2] [Shape3]
+[Shape4] [Shape5] [Shape6] →   [Shape4] [Shape5] [Shape6]
+[Shape7] [Shape8] [Shape9]     [Shape7] [Shape8] [Shape9]
+```
+
+**How to use:**
+
+1. Select the shapes you want to arrange (maintains selection order)
+2. Specify desired rows and columns (e.g., 3 rows, 3 columns)
+3. Specify spacing between shapes (default: 20 points)
+4. Click **Arrange in Matrix**
+
+**Auto-expansion:**
+
+If you select more shapes than fit in the requested dimensions, rows are automatically expanded:
+
+- **Example:** 10 shapes, 3×3 requested → becomes 4×3 (4 rows, 3 columns)
+- Last row may be incomplete (e.g., 10 shapes in 3 cols = 4 rows, last row has 1 shape)
+- Formula: `actualRows = Math.ceil(numShapes / requestedCols)`
+
+**Technical details:**
+
+- Shapes maintain their **selection order** (not sorted by position)
+- Matrix is positioned using the **bounding box** of current selection
+- Cell size is calculated: `cellWidth = (bounds.width - (cols-1)*spacing) / cols`
+- Position calculation: `left = bounds.left + col*(cellWidth + spacing)`
+
+**Use cases:**
+
+- Creating uniform grids of icons or images
+- Organizing scattered shapes into a neat layout
+- Creating dashboard-style arrangements
+
+---
+
 ## Anchor Management
 
 The "anchor" is the reference shape that other shapes align to. SuperSlides provides explicit anchor control so you always know which shape is the reference.
@@ -360,6 +476,10 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `runAlignTop()` | Shows "Aligning...", calls `alignTop()`, shows result |
 | `runAlignBottom()` | Shows "Aligning...", calls `alignBottom()`, shows result |
 | `runAlignMiddle()` | Shows "Aligning...", calls `alignMiddle()`, shows result |
+| `showTableAlignDialog()` | Shows modal dialog for table alignment options |
+| `hideTableAlignDialog()` | Hides the table alignment modal dialog |
+| `runTableAlign()` | Gets selected alignment and padding, calls `alignToTable()` |
+| `runArrangeMatrix()` | Gets rows/cols/spacing, calls `arrangeMatrix()`, shows result |
 
 ---
 
@@ -384,7 +504,21 @@ Alignment operations require at least 2 selected shapes:
 
 ### Some Elements May Not Move
 
-Certain element types (like embedded videos or linked objects) may not support `setLeft()`. These are caught by try/catch and reported in the status message.
+Certain element types (like embedded videos or linked objects) may not support `setLeft()` or `setTop()`. These are caught by try/catch and reported in the status message.
+
+### Table Alignment Limitations
+
+- **Shape must be in a cell**: Only shapes whose center point is within a table cell are aligned. Shapes outside cells are skipped.
+- **Cell detection uses center point**: If a shape spans multiple cells, the cell containing its center point is used.
+- **Multiple tables**: If multiple tables exist on a slide, all are checked, but shapes align only within their containing table.
+- **Select shapes, not tables**: The table itself should not be selected. Tables are automatically filtered from the selection to prevent accidental movement.
+- **Vertical centering**: Shapes are always centered vertically within their cells. Top/bottom alignment within cells is not currently supported.
+
+### Matrix Alignment Limitations
+
+- **Selection order matters**: Shapes are arranged in the order they were selected, not sorted by position.
+- **Matrix bounds**: The matrix uses the bounding box of current selection as its reference area.
+- **Incomplete rows**: If shapes don't perfectly fit the dimensions, the last row may be incomplete (expected behavior).
 
 ---
 
@@ -394,8 +528,8 @@ Certain element types (like embedded videos or linked objects) may not support `
 superslides/
 ├── src/
 │   ├── appsscript.json    # Manifest (scopes, runtime)
-│   ├── Code.gs            # Server-side logic (~680 lines)
-│   └── Sidebar.html       # UI + client-side JS (~380 lines)
+│   ├── Code.gs            # Server-side logic (~1450 lines)
+│   └── Sidebar.html       # UI + client-side JS (~570 lines)
 └── FEATURES.md            # This documentation
 ```
 

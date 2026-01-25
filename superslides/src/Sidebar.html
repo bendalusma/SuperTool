@@ -132,6 +132,85 @@
     <button onclick="runAlignBottom()">Align Bottom</button>
     <button onclick="runAlignMiddle()">Align Middle</button>
 
+    <hr>
+
+    <!-- 
+      TABLE ALIGNMENT CONTROLS
+      
+      These buttons align shapes within their containing table cells.
+      User should:
+      1. Have a table on the slide
+      2. Select shapes that are inside table cells
+      3. Specify padding (distance from cell edge)
+      4. Click alignment button
+      
+      Shapes are aligned within their cells, not relative to each other.
+      Multiple shapes in the same cell are stacked vertically.
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Table Alignment</h4>
+    <button onclick="showTableAlignDialog()">Align in Table</button>
+    
+    <!-- Modal Dialog for Table Alignment -->
+    <div id="tableAlignModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 250px;">
+        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 16px;">Align in Table</h3>
+        
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 8px;">Alignment:</label>
+          <label style="display: block; margin-bottom: 6px; font-size: 13px;">
+            <input type="radio" name="tableAlign" value="left" checked style="margin-right: 6px;">
+            Left
+          </label>
+          <label style="display: block; margin-bottom: 6px; font-size: 13px;">
+            <input type="radio" name="tableAlign" value="center" style="margin-right: 6px;">
+            Center
+          </label>
+          <label style="display: block; margin-bottom: 6px; font-size: 13px;">
+            <input type="radio" name="tableAlign" value="right" style="margin-right: 6px;">
+            Right
+          </label>
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <label for="modalTablePadding" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Padding (points):</label>
+          <input type="number" id="modalTablePadding" value="10" min="0" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+        
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="hideTableAlignDialog()" style="background: #ddd; color: #333;">Cancel</button>
+          <button onclick="runTableAlign()" style="background: #4285f4; color: white;">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- 
+      MATRIX ALIGNMENT CONTROLS
+      
+      Arranges selected shapes into a grid/matrix layout.
+      User should:
+      1. Select shapes to arrange
+      2. Specify desired rows and columns
+      3. Specify spacing between shapes
+      4. Click "Arrange in Matrix"
+      
+      Features:
+      - Auto-expands dimensions if shapes don't fit (e.g., 10 shapes in 3x3 → 4x3)
+      - Maintains selection order (shapes not sorted by position)
+      - Uses selection bounds as reference area
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Matrix Alignment</h4>
+    <label for="matrixRows" style="font-size: 12px; color: #666;">Rows:</label>
+    <input type="number" id="matrixRows" value="3" min="1" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
+    <label for="matrixCols" style="font-size: 12px; color: #666;">Columns:</label>
+    <input type="number" id="matrixCols" value="3" min="1" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
+    <label for="matrixSpacing" style="font-size: 12px; color: #666;">Spacing (points):</label>
+    <input type="number" id="matrixSpacing" value="20" min="0" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
+    <button onclick="runArrangeMatrix()">Arrange in Matrix</button>
+
+    <hr>
+
     <!-- 
       STATUS DISPLAY
       
@@ -375,6 +454,106 @@
               '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
           })
           .alignMiddle();
+      }
+
+      /**
+       * showTableAlignDialog()
+       *
+       * Shows the modal dialog for table alignment options.
+       */
+      function showTableAlignDialog() {
+        document.getElementById('tableAlignModal').style.display = 'block';
+      }
+
+      /**
+       * hideTableAlignDialog()
+       *
+       * Hides the modal dialog for table alignment options.
+       */
+      function hideTableAlignDialog() {
+        document.getElementById('tableAlignModal').style.display = 'none';
+      }
+
+      /**
+       * runTableAlign()
+       *
+       * Executes table alignment with user-selected options from the dialog.
+       * 
+       * Reads the selected alignment (left/center/right) and padding value,
+       * then calls the server-side alignToTable function.
+       */
+      function runTableAlign() {
+        // Get selected alignment
+        const alignmentRadios = document.getElementsByName('tableAlign');
+        let alignment = 'left'; // default
+        for (let radio of alignmentRadios) {
+          if (radio.checked) {
+            alignment = radio.value;
+            break;
+          }
+        }
+        
+        // Get padding value
+        const padding = parseFloat(document.getElementById('modalTablePadding').value) || 10;
+        
+        // Hide the dialog
+        hideTableAlignDialog();
+        
+        // Show status
+        document.getElementById('status').innerText = 'Aligning to table (' + alignment + ')…';
+        
+        // Call server function
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignToTable(alignment, padding);
+      }
+
+      /**
+       * runArrangeMatrix()
+       *
+       * Called when user clicks "Arrange in Matrix" button.
+       * 
+       * Arranges selected shapes into a grid/matrix layout with user-specified
+       * dimensions and spacing.
+       * 
+       * Features:
+       * - Auto-expands dimensions if shapes don't fit requested size
+       * - Maintains selection order (shapes not sorted)
+       * - Uses selection bounds as reference area
+       */
+      function runArrangeMatrix() {
+        const rows = parseInt(document.getElementById('matrixRows').value) || 3;
+        const cols = parseInt(document.getElementById('matrixCols').value) || 3;
+        const spacing = parseFloat(document.getElementById('matrixSpacing').value) || 20;
+        
+        // Validate inputs
+        if (rows <= 0 || cols <= 0) {
+          document.getElementById('status').innerText = '❌ Error: Rows and columns must be positive numbers.';
+          return;
+        }
+        
+        if (spacing < 0) {
+          document.getElementById('status').innerText = '❌ Error: Spacing cannot be negative.';
+          return;
+        }
+        
+        document.getElementById('status').innerText = 'Arranging in matrix…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Arranged.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .arrangeMatrix(rows, cols, spacing);
       }
 
       // ====================================================================

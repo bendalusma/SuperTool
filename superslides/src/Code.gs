@@ -756,3 +756,672 @@ function alignMiddle() {
 
   return `Aligned ${moved} element(s) to the anchor's vertical center.`;
 }
+
+
+// ============================================================================
+// TABLE-BASED ALIGNMENT
+// ============================================================================
+//
+// These functions align shapes within their containing table cells.
+// 
+// How it works:
+// 1. Find which table cell contains each shape's center point
+// 2. Group shapes by their containing cell
+// 3. Align shapes within each cell with configurable padding
+//
+// ============================================================================
+
+/**
+ * findContainingCell(shape, slide)
+ *
+ * Finds which table cell (if any) contains the shape's center point.
+ * Returns both the cell and its bounds for efficient processing.
+ * 
+ * How it works:
+ * 1. Get all tables on the slide
+ * 2. For each table, iterate through all cells
+ * 3. Calculate each cell's bounds (position and size)
+ * 4. Check if the shape's center point falls within the cell bounds
+ * 5. Return an object with cell and bounds, or null if none found
+ * 
+ * Why center point?
+ * - More predictable than checking if shape overlaps cell
+ * - User can visually see where shape is "centered" in cell
+ * - Avoids ambiguity when shape spans multiple cells
+ *
+ * @param {PageElement} shape - The shape to check
+ * @param {Slide} slide - The slide containing the shape
+ * @returns {Object|null} Object with {cell, left, top, width, height} or null if not found
+ */
+function findContainingCell(shape, slide) {
+  // Get all tables on the slide
+  const tables = slide.getTables();
+  
+  if (!tables || tables.length === 0) {
+    return null;
+  }
+
+  // Calculate the shape's center point
+  const shapeCenterX = shape.getLeft() + (shape.getWidth() / 2);
+  const shapeCenterY = shape.getTop() + (shape.getHeight() / 2);
+
+  // Check each table
+  for (let t = 0; t < tables.length; t++) {
+    const table = tables[t];
+    
+    // Get table bounds
+    const tableLeft = table.getLeft();
+    const tableTop = table.getTop();
+    
+    // Get table dimensions (rows and columns)
+    const numRows = table.getNumRows();
+    const numCols = table.getNumColumns();
+    
+    // Calculate table width by summing column widths
+    // (Tables don't have .getWidth() method, so we need to sum column widths)
+    let tableWidth = 0;
+    for (let col = 0; col < numCols; col++) {
+      tableWidth += table.getColumn(col).getWidth();
+    }
+    
+    // Calculate table height by summing row heights
+    let tableHeight = 0;
+    for (let row = 0; row < numRows; row++) {
+      tableHeight += table.getRow(row).getMinimumHeight();
+    }
+    
+    // Calculate cell dimensions
+    const cellWidth = tableWidth / numCols;
+    const cellHeight = tableHeight / numRows;
+    
+    // Check each cell in the table
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        // Calculate cell bounds
+        const cellLeft = tableLeft + (col * cellWidth);
+        const cellTop = tableTop + (row * cellHeight);
+        const cellRight = cellLeft + cellWidth;
+        const cellBottom = cellTop + cellHeight;
+        
+        // Check if shape center is within cell bounds
+        if (shapeCenterX >= cellLeft && 
+            shapeCenterX < cellRight &&
+            shapeCenterY >= cellTop && 
+            shapeCenterY < cellBottom) {
+          // Found the containing cell! Return cell and bounds
+          return {
+            cell: table.getCell(row, col),
+            left: cellLeft,
+            top: cellTop,
+            width: cellWidth,
+            height: cellHeight
+          };
+        }
+      }
+    }
+  }
+  
+  // Shape not contained in any cell
+  return null;
+}
+
+/**
+ * alignShapesInCell(shapes, cellLeft, cellTop, cellWidth, cellHeight, alignment, padding)
+ *
+ * Aligns multiple shapes within a single table cell.
+ * 
+ * If multiple shapes are in the same cell, they are stacked vertically
+ * (top to bottom) with the specified alignment.
+ * 
+ * @param {PageElement[]} shapes - Array of shapes to align
+ * @param {number} cellLeft - Left edge of the cell
+ * @param {number} cellTop - Top edge of the cell
+ * @param {number} cellWidth - Width of the cell
+ * @param {number} cellHeight - Height of the cell
+ * @param {string} alignment - 'left', 'right', or 'center'
+ * @param {number} padding - Padding from cell edge (in points)
+ * @returns {number} Number of shapes successfully aligned
+ */
+function alignShapesInCell(shapes, cellLeft, cellTop, cellWidth, cellHeight, alignment, padding) {
+  if (!shapes || shapes.length === 0) {
+    return 0;
+  }
+
+  // Calculate total height of all shapes (including gaps)
+  let totalHeight = 0;
+  const shapeGap = 5; // Gap between shapes when stacked
+  shapes.forEach((shape, index) => {
+    totalHeight += shape.getHeight();
+    if (index < shapes.length - 1) {
+      totalHeight += shapeGap; // Add gap between shapes (not after last one)
+    }
+  });
+  
+  // Start position: center vertically within the cell
+  let currentTop = cellTop + (cellHeight / 2) - (totalHeight / 2);
+  
+  let aligned = 0;
+
+  shapes.forEach(shape => {
+    try {
+      // Calculate horizontal position based on alignment
+      let newLeft;
+      
+      if (alignment === 'left') {
+        // Align to left edge with padding
+        newLeft = cellLeft + padding;
+      } else if (alignment === 'right') {
+        // Align to right edge with padding
+        newLeft = cellLeft + cellWidth - shape.getWidth() - padding;
+      } else { // 'center'
+        // Center horizontally
+        newLeft = cellLeft + (cellWidth / 2) - (shape.getWidth() / 2);
+      }
+      
+      // Set position
+      shape.setLeft(newLeft);
+      shape.setTop(currentTop);
+      
+      // Move down for next shape (add shape height + gap)
+      currentTop += shape.getHeight() + shapeGap;
+      aligned += 1;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  });
+
+  return aligned;
+}
+
+/**
+ * alignToTable(alignment, padding)
+ *
+ * Aligns selected shapes within their containing table cells.
+ * 
+ * How it works:
+ * 1. Get all selected shapes
+ * 2. Get the current slide
+ * 3. For each shape, find which table cell contains it (by center point)
+ * 4. Group shapes by their containing cell
+ * 5. For each cell group, align shapes with specified padding
+ * 
+ * Alignment options:
+ * - 'left': Align shapes to left edge of cell with padding
+ * - 'right': Align shapes to right edge of cell with padding
+ * - 'center': Center shapes horizontally within cell
+ * 
+ * Multiple shapes in same cell:
+ * - Shapes are stacked vertically (top to bottom)
+ * - Each shape maintains its alignment (left/right/center)
+ * - Small gap (5pt) between stacked shapes
+ *
+ * @param {string} alignment - 'left', 'right', or 'center'
+ * @param {number} padding - Padding from cell edge (in points, default: 10)
+ * @returns {string} Status message describing what happened
+ */
+function alignToTable(alignment, padding) {
+  // Validate alignment parameter
+  if (!alignment || !['left', 'right', 'center'].includes(alignment)) {
+    return 'Invalid alignment. Use "left", "right", or "center".';
+  }
+  
+  // Validate and set default padding
+  if (padding === undefined || padding === null) {
+    padding = 10; // Default 10 points
+  }
+  if (padding < 0) {
+    padding = 0; // Don't allow negative padding
+  }
+
+  // Get the active presentation and current selection
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const range = selection.getPageElementRange();
+
+  // Validate: must have page elements selected
+  if (!range) {
+    return 'No page elements selected. Click shapes on the slide canvas first.';
+  }
+
+  const elements = range.getPageElements();
+  if (!elements || elements.length === 0) {
+    return 'No shapes selected.';
+  }
+  
+  // Filter out tables - we only want shapes, not tables themselves
+  const shapes = elements.filter(function(element) {
+    try {
+      const type = element.getPageElementType();
+      // Only process SHAPE, IMAGE, TEXT_BOX, etc. - NOT TABLE
+      return type !== SlidesApp.PageElementType.TABLE;
+    } catch (e) {
+      return false; // Skip elements that cause errors
+    }
+  });
+  
+  if (!shapes || shapes.length === 0) {
+    return 'No shapes selected. Please select shapes inside the table, not the table itself.';
+  }
+
+  // Get the current slide directly from selection
+  const currentPage = selection.getCurrentPage();
+  
+  if (!currentPage) {
+    return 'Could not determine current page. Please try again.';
+  }
+  
+  // Check if we're on a slide (not a master or layout)
+  if (currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return 'Please select shapes on a slide (not master slide or layout).';
+  }
+  
+  const slide = currentPage.asSlide();
+
+  // Check if slide has any tables
+  const tables = slide.getTables();
+  if (!tables || tables.length === 0) {
+    return 'No tables found on this slide. Add a table first.';
+  }
+
+  // Group shapes by their containing cell
+  // Key: cell identifier (row-col), Value: array of {shape, bounds}
+  const cellGroups = {};
+  let shapesInCells = 0;
+  let shapesNotInCells = 0;
+
+  shapes.forEach(shape => {
+    try {
+      const cellInfo = findContainingCell(shape, slide);
+      
+      if (cellInfo) {
+        // Create a unique key for this cell (we'll use bounds as identifier)
+        const cellKey = `${cellInfo.left.toFixed(2)}-${cellInfo.top.toFixed(2)}`;
+        
+        if (!cellGroups[cellKey]) {
+          cellGroups[cellKey] = {
+            bounds: {
+              left: cellInfo.left,
+              top: cellInfo.top,
+              width: cellInfo.width,
+              height: cellInfo.height
+            },
+            shapes: []
+          };
+        }
+        
+        cellGroups[cellKey].shapes.push(shape);
+        shapesInCells += 1;
+      } else {
+        shapesNotInCells += 1;
+      }
+    } catch (e) {
+      // Skip shapes that cause errors
+      shapesNotInCells += 1;
+    }
+  });
+
+  // If no shapes are in cells, return early with debug info
+  if (shapesInCells === 0) {
+    // Add debug information
+    const firstShape = shapes[0];
+    const shapeInfo = `Shape center: (${(firstShape.getLeft() + firstShape.getWidth()/2).toFixed(1)}, ${(firstShape.getTop() + firstShape.getHeight()/2).toFixed(1)})`;
+    const tableInfo = `Tables found: ${tables.length}`;
+    
+    // Add table bounds info for debugging (with null checks)
+    let tableBoundsInfo = '';
+    if (tables.length > 0) {
+      const table = tables[0];
+      const tLeft = table.getLeft();
+      const tTop = table.getTop();
+      const tRows = table.getNumRows();
+      const tCols = table.getNumColumns();
+      
+      // Calculate table width by summing column widths
+      let tWidth = 0;
+      for (let col = 0; col < tCols; col++) {
+        tWidth += table.getColumn(col).getWidth();
+      }
+      
+      // Calculate table height by summing row heights
+      let tHeight = 0;
+      for (let row = 0; row < tRows; row++) {
+        tHeight += table.getRow(row).getMinimumHeight();
+      }
+      
+      // Check for null values
+      if (tLeft === null || tTop === null || tWidth === null || tHeight === null) {
+        tableBoundsInfo = `Table: ERROR - Table has null bounds (left=${tLeft}, top=${tTop}, width=${tWidth}, height=${tHeight})`;
+      } else {
+        tableBoundsInfo = `Table: left=${tLeft.toFixed(1)}, top=${tTop.toFixed(1)}, size=${tWidth.toFixed(1)}x${tHeight.toFixed(1)}, grid=${tRows}x${tCols}`;
+        
+        // Calculate first cell bounds for reference
+        const cellW = tWidth / tCols;
+        const cellH = tHeight / tRows;
+        tableBoundsInfo += `, Cell[0,0]: (${tLeft.toFixed(1)},${tTop.toFixed(1)}) to (${(tLeft+cellW).toFixed(1)},${(tTop+cellH).toFixed(1)})`;
+      }
+    }
+    
+    return `No selected shapes are contained in table cells. ${shapesNotInCells} shape(s) skipped. Debug: ${shapeInfo}, ${tableInfo}, ${tableBoundsInfo}`;
+  }
+
+  // Align shapes in each cell group
+  let totalAligned = 0;
+  let totalFailed = 0;
+
+  Object.keys(cellGroups).forEach(cellKey => {
+    const group = cellGroups[cellKey];
+    const aligned = alignShapesInCell(
+      group.shapes,
+      group.bounds.left,
+      group.bounds.top,
+      group.bounds.width,
+      group.bounds.height,
+      alignment,
+      padding
+    );
+    
+    totalAligned += aligned;
+    totalFailed += (group.shapes.length - aligned);
+  });
+
+  // Build status message
+  let message = `Aligned ${totalAligned} shape(s) within table cells (${alignment} alignment).`;
+  
+  if (shapesNotInCells > 0) {
+    message += ` ${shapesNotInCells} shape(s) not in cells were skipped.`;
+  }
+  
+  if (totalFailed > 0) {
+    message += ` ${totalFailed} shape(s) could not be moved.`;
+  }
+
+  return message;
+}
+
+
+// ============================================================================
+// MATRIX ALIGNMENT
+// ============================================================================
+//
+// These functions arrange shapes into a grid/matrix layout.
+// 
+// How it works:
+// 1. User specifies desired rows and columns
+// 2. If shapes don't fit, auto-expand dimensions (e.g., 10 shapes in 3x3 → 4x3)
+// 3. Calculate matrix bounds from selection bounds
+// 4. Arrange shapes in grid maintaining selection order
+//
+// ============================================================================
+
+/**
+ * calculateMatrixDimensions(numShapes, requestedRows, requestedCols)
+ *
+ * Calculates the actual matrix dimensions needed to fit all shapes.
+ * 
+ * If the number of shapes exceeds the requested dimensions, this function
+ * auto-expands the rows to accommodate all shapes.
+ * 
+ * Examples:
+ * - 9 shapes, 3x3 requested → returns {rows: 3, cols: 3} (perfect fit)
+ * - 10 shapes, 3x3 requested → returns {rows: 4, cols: 3} (auto-expand rows)
+ * - 6 shapes, 3x3 requested → returns {rows: 2, cols: 3} (fewer rows needed)
+ * 
+ * Formula:
+ * - actualRows = Math.ceil(numShapes / requestedCols)
+ * - actualCols = requestedCols (columns stay fixed)
+ * 
+ * Why auto-expand rows instead of columns?
+ * - More intuitive: shapes flow left-to-right, top-to-bottom
+ * - Last row may be incomplete (e.g., 10 shapes in 3 cols = 4 rows, last row has 1)
+ *
+ * @param {number} numShapes - Total number of shapes to arrange
+ * @param {number} requestedRows - User's requested number of rows
+ * @param {number} requestedCols - User's requested number of columns
+ * @returns {Object} Object with {rows, cols} representing actual dimensions
+ */
+function calculateMatrixDimensions(numShapes, requestedRows, requestedCols) {
+  // Validate inputs
+  if (numShapes <= 0) {
+    return {rows: 1, cols: 1};
+  }
+  
+  if (requestedRows <= 0 || requestedCols <= 0) {
+    return {rows: 1, cols: numShapes};
+  }
+
+  // Calculate actual rows needed
+  // If shapes fit in requested dimensions, use those
+  // Otherwise, expand rows to fit all shapes
+  const maxShapesInRequested = requestedRows * requestedCols;
+  
+  if (numShapes <= maxShapesInRequested) {
+    // Shapes fit in requested dimensions
+    // But we might need fewer rows if shapes < requested
+    const actualRows = Math.ceil(numShapes / requestedCols);
+    return {
+      rows: actualRows,
+      cols: requestedCols
+    };
+  } else {
+    // Auto-expand: calculate rows needed to fit all shapes
+    const actualRows = Math.ceil(numShapes / requestedCols);
+    return {
+      rows: actualRows,
+      cols: requestedCols
+    };
+  }
+}
+
+/**
+ * getSelectionBounds(elements)
+ *
+ * Calculates the bounding box that contains all selected shapes.
+ * 
+ * This bounding box is used as the reference area for the matrix layout.
+ * The matrix will be positioned and sized to fit within this area.
+ * 
+ * How it works:
+ * 1. Find the leftmost edge (minimum left)
+ * 2. Find the topmost edge (minimum top)
+ * 3. Find the rightmost edge (maximum left + width)
+ * 4. Find the bottommost edge (maximum top + height)
+ * 5. Return bounds object
+ *
+ * @param {PageElement[]} elements - Array of selected page elements
+ * @returns {Object} Object with {left, top, width, height} properties
+ */
+function getSelectionBounds(elements) {
+  if (!elements || elements.length === 0) {
+    return {left: 0, top: 0, width: 100, height: 100}; // Default bounds
+  }
+
+  // Initialize with first element's bounds
+  let minLeft = elements[0].getLeft();
+  let minTop = elements[0].getTop();
+  let maxRight = elements[0].getLeft() + elements[0].getWidth();
+  let maxBottom = elements[0].getTop() + elements[0].getHeight();
+
+  // Find extremes across all elements
+  elements.forEach(el => {
+    const left = el.getLeft();
+    const top = el.getTop();
+    const right = left + el.getWidth();
+    const bottom = top + el.getHeight();
+
+    if (left < minLeft) minLeft = left;
+    if (top < minTop) minTop = top;
+    if (right > maxRight) maxRight = right;
+    if (bottom > maxBottom) maxBottom = bottom;
+  });
+
+  return {
+    left: minLeft,
+    top: minTop,
+    width: maxRight - minLeft,
+    height: maxBottom - minTop
+  };
+}
+
+/**
+ * arrangeInMatrix(elements, rows, cols, spacing, bounds)
+ *
+ * Arranges shapes in a grid/matrix layout within the specified bounds.
+ * 
+ * How it works:
+ * 1. Calculate cell size based on bounds and spacing
+ * 2. For each shape (in selection order), calculate its grid position
+ * 3. Position shape at calculated cell position
+ * 
+ * Grid calculation:
+ * - cellWidth = (bounds.width - (cols-1)*spacing) / cols
+ * - cellHeight = (bounds.height - (rows-1)*spacing) / rows
+ * 
+ * Position calculation for shape at index i:
+ * - row = Math.floor(i / cols)
+ * - col = i % cols
+ * - left = bounds.left + col * (cellWidth + spacing)
+ * - top = bounds.top + row * (cellHeight + spacing)
+ * 
+ * Note: Shapes maintain their selection order. They are NOT sorted by position.
+ *
+ * @param {PageElement[]} elements - Array of shapes to arrange
+ * @param {number} rows - Number of rows in matrix
+ * @param {number} cols - Number of columns in matrix
+ * @param {number} spacing - Spacing between shapes (in points)
+ * @param {Object} bounds - Bounding box {left, top, width, height}
+ * @returns {number} Number of shapes successfully arranged
+ */
+function arrangeInMatrix(elements, rows, cols, spacing, bounds) {
+  if (!elements || elements.length === 0) {
+    return 0;
+  }
+
+  // Calculate cell dimensions
+  // Total spacing = (cols-1) * spacing (spacing between columns)
+  const totalHorizontalSpacing = (cols - 1) * spacing;
+  const cellWidth = (bounds.width - totalHorizontalSpacing) / cols;
+  
+  // Total spacing = (rows-1) * spacing (spacing between rows)
+  const totalVerticalSpacing = (rows - 1) * spacing;
+  const cellHeight = (bounds.height - totalVerticalSpacing) / rows;
+
+  let arranged = 0;
+
+  // Arrange each shape in grid position
+  elements.forEach((shape, index) => {
+    try {
+      // Calculate grid position (row and column)
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      
+      // Calculate actual position
+      // For horizontal: start at bounds.left, add column offset
+      const left = bounds.left + (col * (cellWidth + spacing));
+      
+      // For vertical: start at bounds.top, add row offset
+      const top = bounds.top + (row * (cellHeight + spacing));
+      
+      // Center shape within its cell (optional - could align top-left instead)
+      // For now, we'll position at top-left of cell
+      // User can adjust if needed
+      
+      shape.setLeft(left);
+      shape.setTop(top);
+      arranged += 1;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  });
+
+  return arranged;
+}
+
+/**
+ * arrangeMatrix(rows, cols, spacing)
+ *
+ * Arranges selected shapes into a grid/matrix layout.
+ * 
+ * How it works:
+ * 1. Get selected shapes
+ * 2. Validate inputs (rows, cols, spacing)
+ * 3. Calculate actual matrix dimensions (with auto-expand if needed)
+ * 4. Get bounding box of current selection
+ * 5. Arrange shapes in matrix maintaining selection order
+ * 
+ * Auto-expansion:
+ * - If number of shapes > requested rows × cols, rows are auto-expanded
+ * - Example: 10 shapes, 3×3 requested → becomes 4×3 (4 rows, 3 cols)
+ * - Last row may be incomplete (e.g., 10 shapes in 3 cols = 4 rows, last row has 1 shape)
+ * 
+ * Matrix positioning:
+ * - Matrix is positioned using the bounding box of current selection
+ * - Shapes are arranged within this bounding box area
+ * - Spacing is applied between shapes (not around edges)
+ *
+ * @param {number} rows - Requested number of rows
+ * @param {number} cols - Requested number of columns
+ * @param {number} spacing - Spacing between shapes (in points, default: 20)
+ * @returns {string} Status message describing what happened
+ */
+function arrangeMatrix(rows, cols, spacing) {
+  // Validate inputs
+  if (!rows || rows <= 0) {
+    return 'Invalid rows. Please specify a positive number.';
+  }
+  
+  if (!cols || cols <= 0) {
+    return 'Invalid columns. Please specify a positive number.';
+  }
+  
+  // Validate and set default spacing
+  if (spacing === undefined || spacing === null) {
+    spacing = 20; // Default 20 points
+  }
+  if (spacing < 0) {
+    spacing = 0; // Don't allow negative spacing
+  }
+
+  // Get the active presentation and current selection
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const range = selection.getPageElementRange();
+
+  // Validate: must have page elements selected
+  if (!range) {
+    return 'No page elements selected. Click shapes on the slide canvas first.';
+  }
+
+  const elements = range.getPageElements();
+  if (!elements || elements.length === 0) {
+    return 'No shapes selected.';
+  }
+
+  const numShapes = elements.length;
+
+  // Calculate actual matrix dimensions (with auto-expand if needed)
+  const dimensions = calculateMatrixDimensions(numShapes, rows, cols);
+  const actualRows = dimensions.rows;
+  const actualCols = dimensions.cols;
+
+  // Build dimension info message
+  let dimensionMessage = '';
+  if (actualRows !== rows || actualCols !== cols) {
+    dimensionMessage = ` (auto-expanded to ${actualRows}×${actualCols} to fit ${numShapes} shape(s))`;
+  }
+
+  // Get bounding box of current selection
+  const bounds = getSelectionBounds(elements);
+
+  // Arrange shapes in matrix
+  const arranged = arrangeInMatrix(elements, actualRows, actualCols, spacing, bounds);
+
+  // Build status message
+  let message = `Arranged ${arranged} shape(s) in ${actualRows}×${actualCols} matrix${dimensionMessage}.`;
+  
+  if (arranged < numShapes) {
+    const failed = numShapes - arranged;
+    message += ` ${failed} shape(s) could not be moved.`;
+  }
+
+  return message;
+}
