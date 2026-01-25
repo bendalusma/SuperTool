@@ -7,7 +7,9 @@ and advanced charting**.
 The project is structured as two sub-brands:
 
 - **SuperSlides** – layout, alignment, sizing, and positioning tools for Google Slides
-- **SuperSheets** – formatting, table, and advanced charting tools for Google Sheets
+- **SuperSheets** – formatting, table, and custom formulas 
+- **SuperCharts** – advanced charting tools for Google Sheets and Google Slides
+
 
 The long-term goal is to provide a ThinkCell-like experience for Google Workspace,
 starting with a lightweight MVP built using Google Apps Script, with optional future

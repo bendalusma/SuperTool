@@ -2,92 +2,210 @@
 <html>
   <head>
     <!--
+      ========================================================================
+      SuperSlides - Sidebar.html
+      ========================================================================
+      
+      This is the sidebar UI that appears when users click SuperSlides > Open Sidebar.
+      
+      Key concepts:
+      - This HTML runs in an IFRAME inside Google Slides (client-side/browser)
+      - It CANNOT directly access Google Slides data or APIs
+      - To do anything useful, it must call server-side functions in Code.gs
+      - Communication happens via google.script.run (a special Apps Script bridge)
+      
+      Architecture:
+      
+        [Sidebar HTML/JS]  ←—google.script.run—→  [Code.gs on Google servers]
+              ↓                                           ↓
+        User sees UI                              Accesses Slides API
+        Handles clicks                            Reads/moves shapes
+        Shows status                              Stores properties
+      
+      ========================================================================
+    -->
+    
+    <!--
       base target="_top" is a Google Apps Script best practice.
-      It ensures links open outside the iframe if you add any later.
+      
+      The sidebar runs in an iframe. Without this, if you add any links (<a href>),
+      they would try to open inside the tiny iframe instead of in a new tab.
+      target="_top" makes links open in the main browser window.
     -->
     <base target="_top">
 
     <style>
       /*
+        ======================================================================
+        STYLES
+        ======================================================================
+        
         Minimal styling for MVP.
-        We’ll replace this later with a proper design system.
+        Later we'll replace this with a proper design system including:
+        - Custom colors and spacing variables
+        - SVG icons for buttons
+        - Hover/active states
+        - Grouped button layouts
       */
+      
+      /* Base body styles */
       body {
-        font-family: Arial, sans-serif;
-        padding: 12px;
+        font-family: Arial, sans-serif;  /* Clean, readable font */
+        padding: 12px;                   /* Space around content */
       }
 
+      /* Remove default top margin from heading */
       h3 {
         margin-top: 0;
       }
 
+      /* Button styles - all buttons are full-width blocks */
       button {
-        display: block;
-        width: 100%;
-        margin: 8px 0;
-        padding: 8px;
-        font-size: 14px;
-        cursor: pointer;
+        display: block;      /* Stack buttons vertically */
+        width: 100%;         /* Full width of sidebar */
+        margin: 8px 0;       /* Vertical spacing between buttons */
+        padding: 8px;        /* Inner padding for click target */
+        font-size: 14px;     /* Readable text size */
+        cursor: pointer;     /* Show hand cursor on hover */
       }
 
+      /* Status text area at the bottom */
       #status {
-        margin-top: 12px;
-        font-size: 12px;
-        color: #555;
+        margin-top: 12px;    /* Space above status */
+        font-size: 12px;     /* Smaller text for status */
+        color: #555;         /* Gray color - less prominent than buttons */
       }
     </style>
   </head>
 
   <body>
-    <!-- Sidebar title -->
+    <!--
+      ======================================================================
+      HTML STRUCTURE
+      ======================================================================
+      
+      The sidebar is organized into sections:
+      1. Title
+      2. Anchor controls (Set/Clear)
+      3. Alignment controls (Align Left, Align Right, etc.)
+      4. Status display
+      
+      Each button has an onclick handler that calls a JavaScript function
+      defined in the <script> section below.
+    -->
+    
+    <!-- Sidebar title - matches the menu name -->
     <h3>SuperSlides</h3>
 
-    <!-- Anchor controls -->
+    <!-- 
+      ANCHOR CONTROLS
+      
+      Set Anchor: Saves the currently selected shape as the reference point
+      Clear Anchor: Removes the saved anchor, reverts to fallback behavior
+    -->
     <button onclick="runSetAnchor()">Set Anchor</button>
     <button onclick="runClearAnchor()">Clear Anchor</button>
 
+    <!-- Visual separator between anchor and alignment controls -->
     <hr>
 
-    <!-- Alignment controls -->
+    <!-- 
+      ALIGNMENT CONTROLS
+      
+      These buttons align selected shapes relative to the anchor.
+      User should select 2+ shapes before clicking.
+      
+      Horizontal alignment (shapes move left/right):
+      - Align Left: left edges line up
+      - Align Right: right edges line up
+      - Align Center: horizontal centers line up
+      
+      Vertical alignment (shapes move up/down):
+      - Align Top: top edges line up
+      - Align Bottom: bottom edges line up
+      - Align Middle: vertical centers line up
+    -->
     <button onclick="runAlignLeft()">Align Left</button>
+    <button onclick="runAlignRight()">Align Right</button>
+    <button onclick="runAlignCenter()">Align Center</button>
+    <button onclick="runAlignTop()">Align Top</button>
+    <button onclick="runAlignBottom()">Align Bottom</button>
+    <button onclick="runAlignMiddle()">Align Middle</button>
 
-    <!-- Status output -->
+    <!-- 
+      STATUS DISPLAY
+      
+      Shows feedback to the user:
+      - Current anchor state (on load)
+      - "Aligning..." during operations
+      - Success/error messages after operations
+    -->
     <div id="status">Loading…</div>
 
     <!--
-      Everything inside this <script> tag is JavaScript
-      that runs INSIDE the sidebar (client-side).
+      ======================================================================
+      CLIENT-SIDE JAVASCRIPT
+      ======================================================================
+      
+      This JavaScript runs in the browser (inside the sidebar iframe).
+      It handles:
+      - Button click events
+      - Calling server-side functions via google.script.run
+      - Updating the UI with results
+      
+      IMPORTANT: google.script.run is ASYNCHRONOUS
+      - The call returns immediately (doesn't wait for server)
+      - You provide callbacks to handle success/failure
+      - withSuccessHandler() - called when server function succeeds
+      - withFailureHandler() - called when server function throws an error
     -->
     <script>
       /**
        * refreshStatus()
        *
-       * Calls the server-side getAnchorStatus() function
-       * and updates the text in the sidebar.
+       * Fetches the current anchor status from the server and displays it.
+       * Called when the sidebar first loads, and after anchor operations.
+       * 
+       * How google.script.run works:
+       * 1. google.script.run creates a connection to the server
+       * 2. .withSuccessHandler(callback) registers a function to call on success
+       * 3. .getAnchorStatus() is the server function name (defined in Code.gs)
+       * 4. When server responds, callback receives the return value as argument
        */
       function refreshStatus() {
         google.script.run
           .withSuccessHandler(function (text) {
+            // 'text' is whatever getAnchorStatus() returned
+            // Update the status div with this text
             document.getElementById('status').innerText = text;
           })
-          .getAnchorStatus();
+          .getAnchorStatus();  // Call the server-side function
       }
 
       /**
        * runSetAnchor()
        *
-       * Calls server-side setAnchor(), then refreshes status.
+       * Called when user clicks "Set Anchor" button.
+       * 
+       * Flow:
+       * 1. Calls server-side setAnchor() function
+       * 2. setAnchor() stores the selected element's ID
+       * 3. On success, refreshStatus() is called to update the display
+       * 
+       * Note: We pass refreshStatus as the success handler (not refreshStatus())
+       * This means "call this function when done", not "call it now"
        */
       function runSetAnchor() {
         google.script.run
-          .withSuccessHandler(refreshStatus)
-          .setAnchor();
+          .withSuccessHandler(refreshStatus)  // After success, refresh the status
+          .setAnchor();                       // Call server function
       }
 
       /**
        * runClearAnchor()
        *
-       * Calls server-side clearAnchor(), then refreshes status.
+       * Called when user clicks "Clear Anchor" button.
+       * Similar to runSetAnchor - clears the anchor then refreshes status.
        */
       function runClearAnchor() {
         google.script.run
@@ -98,29 +216,173 @@
       /**
        * runAlignLeft()
        *
-       * Calls server-side alignLeft().
-       * No status update needed (it moves shapes).
+       * Called when user clicks "Align Left" button.
+       * 
+       * This has more complex handling than anchor functions because:
+       * 1. We want immediate feedback ("Aligning left...")
+       * 2. We want to show the result message from the server
+       * 3. We want to catch and display any errors
+       * 
+       * Flow:
+       * 1. Immediately show "Aligning left..." (user knows click worked)
+       * 2. Call server-side alignLeft()
+       * 3. On success: show the return message (e.g., "Aligned 3 element(s)...")
+       * 4. On failure: show the error with ❌ prefix
        */
-       function runAlignLeft() {
-  // Show immediate UI feedback so you know the click worked
-  document.getElementById('status').innerText = 'Aligning left…';
+      function runAlignLeft() {
+        // Immediate feedback - show user that button click was registered
+        document.getElementById('status').innerText = 'Aligning left…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            // 'msg' is the string returned by alignLeft()
+            // If msg is empty/null for some reason, show generic "Aligned."
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            // 'err' is an Error object if the server function threw an exception
+            // Display the error message to help with debugging
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignLeft();  // Call server function
+      }
 
-  google.script.run
-    .withSuccessHandler(function (msg) {
-      // msg is whatever alignLeft() returns (we'll add that next)
-      document.getElementById('status').innerText = msg || 'Aligned.';
-      // Optional: also refresh anchor status text afterwards
-      // refreshStatus();
-    })
-    .withFailureHandler(function (err) {
-      // This is the key: it surfaces server errors to the UI
-      document.getElementById('status').innerText =
-        '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
-    })
-    .alignLeft();
-}
+      /**
+       * runAlignRight()
+       *
+       * Called when user clicks "Align Right" button.
+       * Same pattern as runAlignLeft - immediate feedback, success/error handling.
+       */
+      function runAlignRight() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Aligning right…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignRight();
+      }
 
-      // When the sidebar loads, immediately fetch anchor status
+      /**
+       * runAlignTop()
+       *
+       * Called when user clicks "Align Top" button.
+       * 
+       * This aligns the TOP edges of all selected shapes to the anchor's top edge.
+       * Shapes move vertically (up/down) while keeping their horizontal position.
+       * 
+       * Same pattern as other alignment functions:
+       * 1. Show immediate feedback ("Aligning top...")
+       * 2. Call server-side alignTop()
+       * 3. Display result or error
+       */
+      function runAlignTop() {
+        // Immediate feedback - show user that button click was registered
+        document.getElementById('status').innerText = 'Aligning top…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            // 'msg' is the string returned by alignTop()
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            // Display the error message to help with debugging
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignTop();  // Call server function
+      }
+
+      /**
+       * runAlignBottom()
+       *
+       * Called when user clicks "Align Bottom" button.
+       * 
+       * This aligns the BOTTOM edges of all selected shapes to the anchor's bottom edge.
+       * Shapes move vertically (up/down) while keeping their horizontal position.
+       * 
+       * Note: Like alignRight, this requires calculating where each shape's TOP
+       * needs to be so that its BOTTOM aligns with the anchor's bottom.
+       */
+      function runAlignBottom() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Aligning bottom…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignBottom();
+      }
+
+      /**
+       * runAlignCenter()
+       *
+       * Called when user clicks "Align Center" button.
+       * 
+       * This aligns the HORIZONTAL CENTERS of all selected shapes to the anchor's center.
+       * Shapes move horizontally (left/right) while keeping their vertical position.
+       * 
+       * Note: This is center-based alignment, not edge-based. Each shape's center
+       * point aligns with the anchor's center, regardless of shape width.
+       */
+      function runAlignCenter() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Aligning center…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignCenter();
+      }
+
+      /**
+       * runAlignMiddle()
+       *
+       * Called when user clicks "Align Middle" button.
+       * 
+       * This aligns the VERTICAL CENTERS of all selected shapes to the anchor's center.
+       * Shapes move vertically (up/down) while keeping their horizontal position.
+       * 
+       * Note: This is center-based alignment, not edge-based. Each shape's center
+       * point aligns with the anchor's center, regardless of shape height.
+       */
+      function runAlignMiddle() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Aligning middle…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignMiddle();
+      }
+
+      // ====================================================================
+      // INITIALIZATION
+      // ====================================================================
+      
+      // When the sidebar HTML loads, immediately fetch and display
+      // the current anchor status so user knows the state
       refreshStatus();
     </script>
   </body>
