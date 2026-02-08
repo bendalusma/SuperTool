@@ -759,6 +759,627 @@ function alignMiddle() {
 
 
 // ============================================================================
+// POSITION MANIPULATION
+// ============================================================================
+//
+// These functions manipulate the positions of shapes in various ways:
+// - Swap: Exchange positions of two shapes
+// - Distribute: Arrange shapes with equal spacing
+// - Dock: Move shapes until they touch the anchor's edges
+//
+// ============================================================================
+
+/**
+ * swapPositions()
+ *
+ * Swaps the positions of exactly two selected shapes.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                    AFTER:
+ *   
+ *   [Shape A]                  [Shape B]
+ *              [Shape B]  →                 [Shape A]
+ *   
+ *   Shapes exchange positions while maintaining size and other properties.
+ * 
+ * How it works:
+ * 1. Requires exactly 2 selected elements
+ * 2. Stores the left/top coordinates of both shapes
+ * 3. Swaps their positions using setLeft() and setTop()
+ * 
+ * Note: This swaps only position (left, top), not size, rotation, or styling.
+ * Shapes may overlap after swapping - this is expected behavior.
+ * 
+ * Use cases:
+ * - Quick position exchange without manual dragging
+ * - Swapping placeholder positions in layouts
+ * - A/B testing different arrangements
+ * 
+ * @returns {string} Status message
+ */
+function swapPositions() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have exactly 2 elements
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select exactly 2 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  if (elements.length !== 2) {
+    return `⚠️ Please select exactly 2 shapes to swap. Currently selected: ${elements.length}`;
+  }
+
+  // Get references to both shapes
+  const shape1 = elements[0];
+  const shape2 = elements[1];
+
+  // Store original positions
+  // We need to capture both before making any changes
+  const shape1Left = shape1.getLeft();
+  const shape1Top = shape1.getTop();
+  const shape2Left = shape2.getLeft();
+  const shape2Top = shape2.getTop();
+
+  // Perform the swap
+  // Shape 1 moves to Shape 2's old position
+  shape1.setLeft(shape2Left);
+  shape1.setTop(shape2Top);
+  
+  // Shape 2 moves to Shape 1's old position
+  shape2.setLeft(shape1Left);
+  shape2.setTop(shape1Top);
+
+  return '✅ Positions swapped successfully!';
+}
+
+/**
+ * distributeHorizontally()
+ *
+ * Distributes selected shapes evenly across horizontal space.
+ * Similar to PowerPoint's "Distribute Horizontally" feature.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                         AFTER:
+ *   
+ *   [1]  [2][3]    [4]       [5]   [1]  [2]  [3]  [4]  [5]
+ *                              →     
+ *   Random spacing                  Equal gaps between all shapes
+ * 
+ * How it works:
+ * 1. Requires at least 3 shapes (2 edges + shapes to distribute between)
+ * 2. Sorts shapes by their left position (left-to-right order)
+ * 3. Keeps leftmost and rightmost shapes fixed as anchors
+ * 4. Distributes middle shapes with equal gaps between them
+ * 
+ * Formula:
+ * - totalSpace = rightmost.right - leftmost.left
+ * - usedSpace = sum of all shape widths
+ * - gapSpace = totalSpace - usedSpace
+ * - gapSize = gapSpace / (numShapes - 1)
+ * 
+ * Note: If shapes don't fit in available space, they will overlap 
+ * (same as PowerPoint behavior)
+ * 
+ * Use cases:
+ * - Creating evenly spaced button rows
+ * - Aligning timeline markers
+ * - Organizing navigation elements
+ * 
+ * @returns {string} Status message
+ */
+function distributeHorizontally() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have at least 3 elements
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 3 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  if (elements.length < 3) {
+    return `⚠️ Please select at least 3 shapes to distribute. Currently selected: ${elements.length}`;
+  }
+
+  // Sort shapes by left position (left to right)
+  // We need to create a copy of the array to avoid modifying the original
+  const sortedShapes = elements.slice().sort(function(a, b) {
+    return a.getLeft() - b.getLeft();
+  });
+
+  // Calculate total space between leftmost and rightmost shapes
+  const leftmostShape = sortedShapes[0];
+  const rightmostShape = sortedShapes[sortedShapes.length - 1];
+  
+  // Left edge of the bounding area
+  const leftEdge = leftmostShape.getLeft();
+  
+  // Right edge of the bounding area
+  const rightEdge = rightmostShape.getLeft() + rightmostShape.getWidth();
+  
+  // Total horizontal space we're working with
+  const totalSpace = rightEdge - leftEdge;
+
+  // Calculate total width of all shapes
+  let totalShapeWidth = 0;
+  for (let i = 0; i < sortedShapes.length; i++) {
+    totalShapeWidth += sortedShapes[i].getWidth();
+  }
+
+  // Calculate gap size
+  // Total space minus all shape widths gives us space for gaps
+  const totalGapSpace = totalSpace - totalShapeWidth;
+  
+  // Divide gap space by number of gaps (one less than number of shapes)
+  const gapSize = totalGapSpace / (sortedShapes.length - 1);
+
+  // Position each shape (leftmost stays fixed, rightmost will end up in correct position)
+  let currentLeft = leftEdge;
+  
+  for (let i = 0; i < sortedShapes.length; i++) {
+    const shape = sortedShapes[i];
+    
+    // Set position (first shape already at correct position, so skip it)
+    if (i > 0) {
+      shape.setLeft(currentLeft);
+    }
+    
+    // Move current position for next shape
+    // Add this shape's width plus the gap to get to the next shape's left edge
+    currentLeft += shape.getWidth() + gapSize;
+  }
+
+  return `✅ ${elements.length} shapes distributed horizontally!`;
+}
+
+/**
+ * distributeVertically()
+ *
+ * Distributes selected shapes evenly across vertical space.
+ * Similar to PowerPoint's "Distribute Vertically" feature.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                AFTER:
+ *   
+ *   [Shape 1]              [Shape 1]
+ *   [Shape 2]                ↓ equal gap
+ *                          [Shape 2]
+ *   [Shape 3]       →        ↓ equal gap
+ *          [Shape 4]       [Shape 3]
+ *   [Shape 5]                ↓ equal gap
+ *                          [Shape 4]
+ *                            ↓ equal gap
+ *                          [Shape 5]
+ * 
+ * How it works:
+ * 1. Requires at least 3 shapes (2 edges + shapes to distribute between)
+ * 2. Sorts shapes by their top position (top-to-bottom order)
+ * 3. Keeps topmost and bottommost shapes fixed as anchors
+ * 4. Distributes middle shapes with equal gaps between them
+ * 
+ * Formula:
+ * - totalSpace = bottommost.bottom - topmost.top
+ * - usedSpace = sum of all shape heights
+ * - gapSpace = totalSpace - usedSpace
+ * - gapSize = gapSpace / (numShapes - 1)
+ * 
+ * Note: If shapes don't fit in available space, they will overlap
+ * (same as PowerPoint behavior)
+ * 
+ * Use cases:
+ * - Creating evenly spaced vertical navigation
+ * - Aligning list items
+ * - Organizing vertical timelines
+ * 
+ * @returns {string} Status message
+ */
+function distributeVertically() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have at least 3 elements
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 3 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  if (elements.length < 3) {
+    return `⚠️ Please select at least 3 shapes to distribute. Currently selected: ${elements.length}`;
+  }
+
+  // Sort shapes by top position (top to bottom)
+  // We need to create a copy of the array to avoid modifying the original
+  const sortedShapes = elements.slice().sort(function(a, b) {
+    return a.getTop() - b.getTop();
+  });
+
+  // Calculate total space between topmost and bottommost shapes
+  const topmostShape = sortedShapes[0];
+  const bottommostShape = sortedShapes[sortedShapes.length - 1];
+  
+  // Top edge of the bounding area
+  const topEdge = topmostShape.getTop();
+  
+  // Bottom edge of the bounding area
+  const bottomEdge = bottommostShape.getTop() + bottommostShape.getHeight();
+  
+  // Total vertical space we're working with
+  const totalSpace = bottomEdge - topEdge;
+
+  // Calculate total height of all shapes
+  let totalShapeHeight = 0;
+  for (let i = 0; i < sortedShapes.length; i++) {
+    totalShapeHeight += sortedShapes[i].getHeight();
+  }
+
+  // Calculate gap size
+  // Total space minus all shape heights gives us space for gaps
+  const totalGapSpace = totalSpace - totalShapeHeight;
+  
+  // Divide gap space by number of gaps (one less than number of shapes)
+  const gapSize = totalGapSpace / (sortedShapes.length - 1);
+
+  // Position each shape (topmost stays fixed, bottommost will end up in correct position)
+  let currentTop = topEdge;
+  
+  for (let i = 0; i < sortedShapes.length; i++) {
+    const shape = sortedShapes[i];
+    
+    // Set position (first shape already at correct position, so skip it)
+    if (i > 0) {
+      shape.setTop(currentTop);
+    }
+    
+    // Move current position for next shape
+    // Add this shape's height plus the gap to get to the next shape's top edge
+    currentTop += shape.getHeight() + gapSize;
+  }
+
+  return `✅ ${elements.length} shapes distributed vertically!`;
+}
+
+/**
+ * dockLeft()
+ *
+ * Moves selected shapes until their RIGHT edges touch the anchor's LEFT edge.
+ * Creates a "docked to the left" effect where shapes stack to the left of the anchor.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                         AFTER:
+ *   
+ *        [Shape 1]                 [Shape 1][Anchor]
+ *   [Anchor]                  →    [Shape 2][Anchor]
+ *      [Shape 2]
+ *   
+ *   Shapes dock to the left side of the anchor.
+ * 
+ * How it works:
+ * 1. Resolves the anchor shape (using Set Anchor or fallback)
+ * 2. For each non-anchor shape:
+ *    - Calculates new position so shape.right = anchor.left
+ *    - Moves shape horizontally (vertical position unchanged)
+ * 
+ * Formula: newLeft = anchorLeft - shapeWidth
+ * 
+ * Note: Multiple shapes will stack on top of each other at the same position.
+ * To avoid overlap, consider docking shapes one at a time, or use this
+ * intentionally to create layered effects.
+ * 
+ * Use cases:
+ * - Creating side-by-side layouts
+ * - Aligning labels to the left of content boxes
+ * - Building flowcharts with connected shapes
+ * 
+ * @returns {string} Status message
+ */
+function dockLeft() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have page elements selected
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 2 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  // Validation: Need at least 2 elements (anchor + shapes to dock)
+  if (elements.length < 2) {
+    return '⚠️ Please select at least 2 shapes (anchor + shapes to dock).';
+  }
+
+  // Resolve anchor using the existing anchor resolution logic
+  const anchor = getAnchorOrFallback(elements);
+  const anchorLeft = anchor.getLeft();
+
+  // Move each non-anchor shape
+  let movedCount = 0;
+  
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    
+    // Skip the anchor itself - we don't want to move it
+    if (el.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+
+    try {
+      // Calculate new position: right edge touches anchor's left edge
+      // Formula: newLeft = anchorLeft - shapeWidth
+      // This positions the shape so: shapeLeft + shapeWidth = anchorLeft
+      const newLeft = anchorLeft - el.getWidth();
+      el.setLeft(newLeft);
+      movedCount++;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  }
+
+  return `✅ ${movedCount} shape(s) docked to left of anchor!`;
+}
+
+/**
+ * dockRight()
+ *
+ * Moves selected shapes until their LEFT edges touch the anchor's RIGHT edge.
+ * Creates a "docked to the right" effect where shapes stack to the right of the anchor.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                         AFTER:
+ *   
+ *   [Anchor]                       [Anchor][Shape 1]
+ *        [Shape 1]            →    [Anchor][Shape 2]
+ *   [Shape 2]
+ *   
+ *   Shapes dock to the right side of the anchor.
+ * 
+ * How it works:
+ * 1. Resolves the anchor shape (using Set Anchor or fallback)
+ * 2. For each non-anchor shape:
+ *    - Calculates new position so shape.left = anchor.right
+ *    - Moves shape horizontally (vertical position unchanged)
+ * 
+ * Formula: newLeft = anchorLeft + anchorWidth
+ * 
+ * Note: Multiple shapes will stack on top of each other at the same position.
+ * To avoid overlap, consider docking shapes one at a time.
+ * 
+ * Use cases:
+ * - Creating horizontal flowcharts
+ * - Positioning labels to the right of icons
+ * - Building timeline sequences
+ * 
+ * @returns {string} Status message
+ */
+function dockRight() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have page elements selected
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 2 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  // Validation: Need at least 2 elements (anchor + shapes to dock)
+  if (elements.length < 2) {
+    return '⚠️ Please select at least 2 shapes (anchor + shapes to dock).';
+  }
+
+  // Resolve anchor using the existing anchor resolution logic
+  const anchor = getAnchorOrFallback(elements);
+  
+  // Calculate anchor's right edge position
+  const anchorRight = anchor.getLeft() + anchor.getWidth();
+
+  // Move each non-anchor shape
+  let movedCount = 0;
+  
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    
+    // Skip the anchor itself - we don't want to move it
+    if (el.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+
+    try {
+      // Calculate new position: left edge touches anchor's right edge
+      // Formula: newLeft = anchorRight
+      // This positions the shape so: shapeLeft = anchorLeft + anchorWidth
+      el.setLeft(anchorRight);
+      movedCount++;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  }
+
+  return `✅ ${movedCount} shape(s) docked to right of anchor!`;
+}
+
+/**
+ * dockTop()
+ *
+ * Moves selected shapes until their BOTTOM edges touch the anchor's TOP edge.
+ * Creates a "docked above" effect where shapes stack above the anchor.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                         AFTER:
+ *   
+ *   [Shape 1]                       [Shape 1]
+ *                                   [Shape 2]
+ *   [Anchor]                  →     [Anchor]
+ *                     [Shape 2]
+ *   
+ *   Shapes dock above the anchor.
+ * 
+ * How it works:
+ * 1. Resolves the anchor shape (using Set Anchor or fallback)
+ * 2. For each non-anchor shape:
+ *    - Calculates new position so shape.bottom = anchor.top
+ *    - Moves shape vertically (horizontal position unchanged)
+ * 
+ * Formula: newTop = anchorTop - shapeHeight
+ * 
+ * Note: Multiple shapes will stack on top of each other at the same position.
+ * To avoid overlap, consider docking shapes one at a time.
+ * 
+ * Use cases:
+ * - Creating stacked vertical layouts
+ * - Building vertical flowcharts
+ * - Positioning headers above content sections
+ * 
+ * @returns {string} Status message
+ */
+function dockTop() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have page elements selected
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 2 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  // Validation: Need at least 2 elements (anchor + shapes to dock)
+  if (elements.length < 2) {
+    return '⚠️ Please select at least 2 shapes (anchor + shapes to dock).';
+  }
+
+  // Resolve anchor using the existing anchor resolution logic
+  const anchor = getAnchorOrFallback(elements);
+  const anchorTop = anchor.getTop();
+
+  // Move each non-anchor shape
+  let movedCount = 0;
+  
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    
+    // Skip the anchor itself - we don't want to move it
+    if (el.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+
+    try {
+      // Calculate new position: bottom edge touches anchor's top edge
+      // Formula: newTop = anchorTop - shapeHeight
+      // This positions the shape so: shapeTop + shapeHeight = anchorTop
+      const newTop = anchorTop - el.getHeight();
+      el.setTop(newTop);
+      movedCount++;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  }
+
+  return `✅ ${movedCount} shape(s) docked above anchor!`;
+}
+
+/**
+ * dockBottom()
+ *
+ * Moves selected shapes until their TOP edges touch the anchor's BOTTOM edge.
+ * Creates a "docked below" effect where shapes stack below the anchor.
+ * 
+ * Visual example:
+ * 
+ *   BEFORE:                         AFTER:
+ *   
+ *   [Shape 1]                       [Anchor]
+ *                                   [Shape 1]
+ *   [Anchor]                  →     [Shape 2]
+ *        [Shape 2]
+ *   
+ *   Shapes dock below the anchor.
+ * 
+ * How it works:
+ * 1. Resolves the anchor shape (using Set Anchor or fallback)
+ * 2. For each non-anchor shape:
+ *    - Calculates new position so shape.top = anchor.bottom
+ *    - Moves shape vertically (horizontal position unchanged)
+ * 
+ * Formula: newTop = anchorTop + anchorHeight
+ * 
+ * Note: Multiple shapes will stack on top of each other at the same position.
+ * To avoid overlap, consider docking shapes one at a time.
+ * 
+ * Use cases:
+ * - Creating dropdown-style layouts
+ * - Positioning footers below content sections
+ * - Building vertical step-by-step diagrams
+ * 
+ * @returns {string} Status message
+ */
+function dockBottom() {
+  // Get the current selection from the presentation
+  const selection = SlidesApp.getActivePresentation().getSelection();
+  const pageElements = selection.getPageElementRange();
+
+  // Validation: Must have page elements selected
+  if (!pageElements) {
+    return '⚠️ No elements selected. Please select at least 2 shapes.';
+  }
+
+  const elements = pageElements.getPageElements();
+  
+  // Validation: Need at least 2 elements (anchor + shapes to dock)
+  if (elements.length < 2) {
+    return '⚠️ Please select at least 2 shapes (anchor + shapes to dock).';
+  }
+
+  // Resolve anchor using the existing anchor resolution logic
+  const anchor = getAnchorOrFallback(elements);
+  
+  // Calculate anchor's bottom edge position
+  const anchorBottom = anchor.getTop() + anchor.getHeight();
+
+  // Move each non-anchor shape
+  let movedCount = 0;
+  
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    
+    // Skip the anchor itself - we don't want to move it
+    if (el.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+
+    try {
+      // Calculate new position: top edge touches anchor's bottom edge
+      // Formula: newTop = anchorBottom
+      // This positions the shape so: shapeTop = anchorTop + anchorHeight
+      el.setTop(anchorBottom);
+      movedCount++;
+    } catch (e) {
+      // Skip shapes that can't be moved
+    }
+  }
+
+  return `✅ ${movedCount} shape(s) docked below anchor!`;
+}
+
+
+// ============================================================================
 // TABLE-BASED ALIGNMENT
 // ============================================================================
 //
@@ -1424,4 +2045,1342 @@ function arrangeMatrix(rows, cols, spacing) {
   }
 
   return message;
+}
+
+
+// ============================================================================
+// SLIDE LAYOUT
+// ============================================================================
+//
+// These functions insert pre-formatted text boxes to create common slide layouts.
+// 
+// Features:
+// - Insert 2, 3, or 4 column layouts with title and content boxes
+// - Insert footnote bars at the bottom of slides
+// - All text boxes are properly sized and positioned
+// - Text is pre-formatted with appropriate sizes and styling
+//
+// Layout specifications:
+// - Vertical start: 0.75 inches from top of slide
+// - Horizontal range: 0 to 9.1 inches
+// - Title boxes: 1 inch tall, 16pt bold text
+// - Content boxes: maximize remaining space, 14pt text
+// - Gap between title and content: 0.05 inches
+// - Gap between columns: 0.2 inches
+//
+// ============================================================================
+
+/**
+ * insertTwoColumns()
+ *
+ * Inserts a 2-column layout with title and content text boxes.
+ * 
+ * Layout:
+ * - 2 columns, each with:
+ *   - Title box: "Header 1", "Header 2" (1 inch tall, bold, 16pt)
+ *   - Content box: "Content 1", "Content 2" (3.0 inches tall, 14pt)
+ * - Positioned 0.75 inches from top of slide
+ * - Spread across 0 to 9.1 inches horizontal space
+ * - 0.2 inch gap between columns
+ * - 0.05 inch gap between title and content boxes
+ * 
+ * Visual example:
+ * 
+ *   ┌──────────────┐  ┌──────────────┐
+ *   │  Header 1    │  │  Header 2    │  ← Title boxes (1")
+ *   ├──────────────┤  ├──────────────┤
+ *   │              │  │              │
+ *   │  Content 1   │  │  Content 2   │  ← Content boxes (3")
+ *   │              │  │              │
+ *   └──────────────┘  └──────────────┘
+ * 
+ * Use cases:
+ * - Side-by-side comparisons
+ * - Two-topic presentations
+ * - Before/after layouts
+ * - Feature comparison slides
+ * 
+ * @returns {string} Status message
+ */
+function insertTwoColumns() {
+  // Get the current slide
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const currentPage = selection.getCurrentPage();
+  
+  // Validate that we're on a slide (not master or layout)
+  if (!currentPage || currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return '⚠️ Please select a slide first. Click on a slide in the main canvas.';
+  }
+  
+  const slide = currentPage.asSlide();
+  
+  // Layout constants (converting inches to points: 1 inch = 72 points)
+  const leftMargin = 0.33 * 72;              // 23.76 points from left edge
+  const verticalStart = 1.4 * 72;            // 100.8 points from top of slide (shifted down)
+  const titleHeight = 0.6 * 72;              // 43.2 points tall for title boxes (shorter headers)
+  const contentHeight = 2.95 * 72;           // 212.4 points tall (ends at 5.0" to leave room for footnote)
+  const gapBetweenTitleAndContent = 0.05 * 72; // 3.6 points gap between title and content
+  const columnGap = 0.2 * 72;                // 14.4 points gap between columns
+  const numColumns = 2;                      // Number of columns to create
+  const totalWidth = 9.34 * 72;              // 672.48 points total horizontal space (10" - 0.33" - 0.33")
+  const padding = 0.01 * 72;                 // 0.72 points internal padding
+  
+  // Calculate column width
+  // Formula: (total width - gaps between columns) / number of columns
+  const columnWidth = (totalWidth - (numColumns - 1) * columnGap) / numColumns;
+  
+  // Create boxes for each column
+  for (let i = 0; i < numColumns; i++) {
+    // Calculate left position for this column (starting from left margin)
+    const columnLeft = leftMargin + (i * (columnWidth + columnGap));
+    
+    // Create title box
+    const titleBox = slide.insertTextBox(
+      `Header ${i + 1}`,  // Text content
+      columnLeft,         // Left position (X)
+      verticalStart,      // Top position (Y)
+      columnWidth,        // Width
+      titleHeight         // Height
+    );
+    
+    // Format title text: bold, 16pt, with padding
+    const titleTextRange = titleBox.getText();
+    titleTextRange.getTextStyle()
+      .setBold(true)
+      .setFontSize(16);
+    
+    // Add internal padding to title box
+    const titleParagraphStyle = titleTextRange.getParagraphStyle();
+    titleParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+    
+    // Create content box below title (with small gap)
+    const contentTop = verticalStart + titleHeight + gapBetweenTitleAndContent;
+    const contentBox = slide.insertTextBox(
+      `Content ${i + 1}`,  // Text content
+      columnLeft,          // Left position (X)
+      contentTop,          // Top position (Y)
+      columnWidth,         // Width
+      contentHeight        // Height
+    );
+    
+    // Format content text: 14pt, with padding
+    const contentTextRange = contentBox.getText();
+    contentTextRange.getTextStyle()
+      .setFontSize(14);
+    
+    // Add internal padding to content box
+    const contentParagraphStyle = contentTextRange.getParagraphStyle();
+    contentParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+  }
+  
+  return `✅ Inserted 2-column layout (${numColumns} titles + ${numColumns} content boxes)!`;
+}
+
+/**
+ * insertThreeColumns()
+ *
+ * Inserts a 3-column layout with title and content text boxes.
+ * 
+ * Layout:
+ * - 3 columns, each with:
+ *   - Title box: "Header 1", "Header 2", "Header 3" (1 inch tall, bold, 16pt)
+ *   - Content box: "Content 1", "Content 2", "Content 3" (3.0 inches tall, 14pt)
+ * - Positioned 0.75 inches from top of slide
+ * - Spread across 0 to 9.1 inches horizontal space
+ * - 0.2 inch gap between columns
+ * - 0.05 inch gap between title and content boxes
+ * 
+ * Visual example:
+ * 
+ *   ┌─────────┐  ┌─────────┐  ┌─────────┐
+ *   │Header 1 │  │Header 2 │  │Header 3 │  ← Title boxes (1")
+ *   ├─────────┤  ├─────────┤  ├─────────┤
+ *   │         │  │         │  │         │
+ *   │Content 1│  │Content 2│  │Content 3│  ← Content boxes (3")
+ *   │         │  │         │  │         │
+ *   └─────────┘  └─────────┘  └─────────┘
+ * 
+ * Use cases:
+ * - Three-step processes
+ * - Past/Present/Future comparisons
+ * - Three-feature showcases
+ * - Triple comparison slides
+ * 
+ * @returns {string} Status message
+ */
+function insertThreeColumns() {
+  // Get the current slide
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const currentPage = selection.getCurrentPage();
+  
+  // Validate that we're on a slide (not master or layout)
+  if (!currentPage || currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return '⚠️ Please select a slide first. Click on a slide in the main canvas.';
+  }
+  
+  const slide = currentPage.asSlide();
+  
+  // Layout constants (converting inches to points: 1 inch = 72 points)
+  const leftMargin = 0.33 * 72;              // 23.76 points from left edge
+  const verticalStart = 1.4 * 72;            // 100.8 points from top of slide (shifted down)
+  const titleHeight = 0.6 * 72;              // 43.2 points tall for title boxes (shorter headers)
+  const contentHeight = 2.95 * 72;           // 212.4 points tall (ends at 5.0" to leave room for footnote)
+  const gapBetweenTitleAndContent = 0.05 * 72; // 3.6 points gap between title and content
+  const columnGap = 0.2 * 72;                // 14.4 points gap between columns
+  const numColumns = 3;                      // Number of columns to create
+  const totalWidth = 9.34 * 72;              // 672.48 points total horizontal space (10" - 0.33" - 0.33")
+  const padding = 0.01 * 72;                 // 0.72 points internal padding
+  
+  // Calculate column width
+  // Formula: (total width - gaps between columns) / number of columns
+  const columnWidth = (totalWidth - (numColumns - 1) * columnGap) / numColumns;
+  
+  // Create boxes for each column
+  for (let i = 0; i < numColumns; i++) {
+    // Calculate left position for this column (starting from left margin)
+    const columnLeft = leftMargin + (i * (columnWidth + columnGap));
+    
+    // Create title box
+    const titleBox = slide.insertTextBox(
+      `Header ${i + 1}`,  // Text content
+      columnLeft,         // Left position (X)
+      verticalStart,      // Top position (Y)
+      columnWidth,        // Width
+      titleHeight         // Height
+    );
+    
+    // Format title text: bold, 16pt, with padding
+    const titleTextRange = titleBox.getText();
+    titleTextRange.getTextStyle()
+      .setBold(true)
+      .setFontSize(16);
+    
+    // Add internal padding to title box
+    const titleParagraphStyle = titleTextRange.getParagraphStyle();
+    titleParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+    
+    // Create content box below title (with small gap)
+    const contentTop = verticalStart + titleHeight + gapBetweenTitleAndContent;
+    const contentBox = slide.insertTextBox(
+      `Content ${i + 1}`,  // Text content
+      columnLeft,          // Left position (X)
+      contentTop,          // Top position (Y)
+      columnWidth,         // Width
+      contentHeight        // Height
+    );
+    
+    // Format content text: 14pt, with padding
+    const contentTextRange = contentBox.getText();
+    contentTextRange.getTextStyle()
+      .setFontSize(14);
+    
+    // Add internal padding to content box
+    const contentParagraphStyle = contentTextRange.getParagraphStyle();
+    contentParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+  }
+  
+  return `✅ Inserted 3-column layout (${numColumns} titles + ${numColumns} content boxes)!`;
+}
+
+/**
+ * insertFourColumns()
+ *
+ * Inserts a 4-column layout with title and content text boxes.
+ * 
+ * Layout:
+ * - 4 columns, each with:
+ *   - Title box: "Header 1" through "Header 4" (1 inch tall, bold, 16pt)
+ *   - Content box: "Content 1" through "Content 4" (3.0 inches tall, 14pt)
+ * - Positioned 0.75 inches from top of slide
+ * - Spread across 0 to 9.1 inches horizontal space
+ * - 0.2 inch gap between columns
+ * - 0.05 inch gap between title and content boxes
+ * 
+ * Visual example:
+ * 
+ *   ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐
+ *   │Head 1│  │Head 2│  │Head 3│  │Head 4│  ← Title boxes (1")
+ *   ├──────┤  ├──────┤  ├──────┤  ├──────┤
+ *   │      │  │      │  │      │  │      │
+ *   │Cont 1│  │Cont 2│  │Cont 3│  │Cont 4│  ← Content boxes (3")
+ *   │      │  │      │  │      │  │      │
+ *   └──────┘  └──────┘  └──────┘  └──────┘
+ * 
+ * Use cases:
+ * - Four-step processes or workflows
+ * - Quarterly comparisons
+ * - Four-feature showcases
+ * - Multi-option comparisons
+ * 
+ * Note: With 4 columns, each column is narrower (~2.125 inches).
+ * Consider using shorter text or reducing font size if content doesn't fit.
+ * 
+ * @returns {string} Status message
+ */
+function insertFourColumns() {
+  // Get the current slide
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const currentPage = selection.getCurrentPage();
+  
+  // Validate that we're on a slide (not master or layout)
+  if (!currentPage || currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return '⚠️ Please select a slide first. Click on a slide in the main canvas.';
+  }
+  
+  const slide = currentPage.asSlide();
+  
+  // Layout constants (converting inches to points: 1 inch = 72 points)
+  const leftMargin = 0.33 * 72;              // 23.76 points from left edge
+  const verticalStart = 1.4 * 72;            // 100.8 points from top of slide (shifted down)
+  const titleHeight = 0.6 * 72;              // 43.2 points tall for title boxes (shorter headers)
+  const contentHeight = 2.95 * 72;           // 212.4 points tall (ends at 5.0" to leave room for footnote)
+  const gapBetweenTitleAndContent = 0.05 * 72; // 3.6 points gap between title and content
+  const columnGap = 0.2 * 72;                // 14.4 points gap between columns
+  const numColumns = 4;                      // Number of columns to create
+  const totalWidth = 9.34 * 72;              // 672.48 points total horizontal space (10" - 0.33" - 0.33")
+  const padding = 0.01 * 72;                 // 0.72 points internal padding
+  
+  // Calculate column width
+  // Formula: (total width - gaps between columns) / number of columns
+  const columnWidth = (totalWidth - (numColumns - 1) * columnGap) / numColumns;
+  
+  // Create boxes for each column
+  for (let i = 0; i < numColumns; i++) {
+    // Calculate left position for this column (starting from left margin)
+    const columnLeft = leftMargin + (i * (columnWidth + columnGap));
+    
+    // Create title box
+    const titleBox = slide.insertTextBox(
+      `Header ${i + 1}`,  // Text content
+      columnLeft,         // Left position (X)
+      verticalStart,      // Top position (Y)
+      columnWidth,        // Width
+      titleHeight         // Height
+    );
+    
+    // Format title text: bold, 16pt, with padding
+    const titleTextRange = titleBox.getText();
+    titleTextRange.getTextStyle()
+      .setBold(true)
+      .setFontSize(16);
+    
+    // Add internal padding to title box
+    const titleParagraphStyle = titleTextRange.getParagraphStyle();
+    titleParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+    
+    // Create content box below title (with small gap)
+    const contentTop = verticalStart + titleHeight + gapBetweenTitleAndContent;
+    const contentBox = slide.insertTextBox(
+      `Content ${i + 1}`,  // Text content
+      columnLeft,          // Left position (X)
+      contentTop,          // Top position (Y)
+      columnWidth,         // Width
+      contentHeight        // Height
+    );
+    
+    // Format content text: 14pt, with padding
+    const contentTextRange = contentBox.getText();
+    contentTextRange.getTextStyle()
+      .setFontSize(14);
+    
+    // Add internal padding to content box
+    const contentParagraphStyle = contentTextRange.getParagraphStyle();
+    contentParagraphStyle
+      .setIndentStart(padding)
+      .setIndentEnd(padding)
+      .setSpaceAbove(padding)
+      .setSpaceBelow(padding);
+  }
+  
+  return `✅ Inserted 4-column layout (${numColumns} titles + ${numColumns} content boxes)!`;
+}
+
+/**
+ * insertFootnote()
+ *
+ * Inserts a footnote text box at the bottom of the slide.
+ * 
+ * Layout:
+ * - Position: 4.8 inches from top, 0 inches from left
+ * - Width: 9 inches
+ * - Height: 0.5 inches (auto-expands if content is longer)
+ * - Text: "Footnote: 1. commentary 1, 2. commentary 2, 3. commentary 3"
+ * - Font size: 12pt
+ * 
+ * Visual example:
+ * 
+ *   [Main slide content above]
+ *   
+ *   ─────────────────────────────────────────────
+ *   Footnote: 1. commentary 1, 2. commentary 2, 3. commentary 3
+ *   
+ * Use cases:
+ * - Adding citations or references
+ * - Including disclaimers or legal text
+ * - Providing additional context
+ * - Sourcing data or statistics
+ * 
+ * Note: The footnote text is fully editable after insertion.
+ * You can replace the placeholder commentary with your actual footnotes.
+ * 
+ * @returns {string} Status message
+ */
+function insertFootnote() {
+  // Get the current slide
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const currentPage = selection.getCurrentPage();
+  
+  // Validate that we're on a slide (not master or layout)
+  if (!currentPage || currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return '⚠️ Please select a slide first. Click on a slide in the main canvas.';
+  }
+  
+  const slide = currentPage.asSlide();
+  
+  // Footnote layout constants (converting inches to points: 1 inch = 72 points)
+  // Google Slides standard dimensions: 10" wide x 5.625" tall (720 x 405 points)
+  const footnoteTop = 5.05 * 72;      // 363.6 points from top
+  const footnoteLeft = 0.33 * 72;     // 23.76 points from left edge (matches column margin)
+  const footnoteWidth = 9.34 * 72;    // 672.48 points wide (10" - 0.33" - 0.33" = 9.34")
+  const footnoteHeight = 0.5 * 72;    // 36 points tall (will auto-expand if needed)
+  
+  // Internal padding (0.01 inches = 0.72 points)
+  const padding = 0.01 * 72;          // 0.72 points padding
+  
+  // Create footnote text box
+  const footnoteBox = slide.insertTextBox(
+    'Footnotes: 1. Footnotes use 9-point text 2. Items should be numbered and presented without commas.',
+    footnoteLeft,
+    footnoteTop,
+    footnoteWidth,
+    footnoteHeight
+  );
+
+  // Format footnote text: 9pt with internal padding and resize to fit text
+  const textRange = footnoteBox.getText();
+  textRange.getTextStyle()
+    .setFontSize(9);
+  
+  // Add internal padding to the text box
+  const paragraphStyle = textRange.getParagraphStyle();
+  paragraphStyle
+    .setIndentStart(padding)        // Left padding
+    .setIndentEnd(padding)          // Right padding
+    .setSpaceAbove(padding)         // Top padding
+    .setSpaceBelow(padding);        // Bottom padding
+  
+  // Note: Google Apps Script doesn't fully support programmatic autofit settings
+  // Users may need to manually enable "Resize shape to fit text" from Format Options
+  // if they want the box to automatically resize as they add more text
+  
+  return '✅ Footnote inserted at bottom of slide!';
+}
+
+// ============================================================================
+// SIZE MANIPULATION
+// ============================================================================
+
+/**
+ * Align Width - Makes all selected objects have the same width as the anchor
+ * 
+ * How it works:
+ * 1. Identifies the anchor object (using Set Anchor or fallback to last element)
+ * 2. Gets the anchor's width
+ * 3. Sets all other selected objects to that same width (keeps their position)
+ * 
+ * Example:
+ * - Anchor width: 200 points
+ * - Object A width: 150 points → becomes 200 points
+ * - Object B width: 300 points → becomes 200 points
+ * 
+ * Use cases:
+ * - Creating uniform button sizes
+ * - Making all cards the same width
+ * - Standardizing column widths
+ * 
+ * @returns {string} Status message
+ */
+function alignWidth() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to align width';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetWidth = anchor.getWidth();
+  
+  // Align width of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      element.setWidth(targetWidth);
+      successCount++;
+    } catch (e) {
+      // Skip elements that don't support setWidth
+    }
+  }
+  
+  return `✅ Aligned width of ${successCount} object(s) to anchor (${Math.round(targetWidth / 72 * 100) / 100}")`;
+}
+
+/**
+ * Align Height - Makes all selected objects have the same height as the anchor
+ * 
+ * How it works:
+ * 1. Identifies the anchor object (using Set Anchor or fallback to last element)
+ * 2. Gets the anchor's height
+ * 3. Sets all other selected objects to that same height (keeps their position)
+ * 
+ * Example:
+ * - Anchor height: 150 points
+ * - Object A height: 100 points → becomes 150 points
+ * - Object B height: 200 points → becomes 150 points
+ * 
+ * Use cases:
+ * - Creating uniform row heights
+ * - Making all icons the same height
+ * - Standardizing image heights
+ * 
+ * @returns {string} Status message
+ */
+function alignHeight() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to align height';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetHeight = anchor.getHeight();
+  
+  // Align height of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      element.setHeight(targetHeight);
+      successCount++;
+    } catch (e) {
+      // Skip elements that don't support setHeight
+    }
+  }
+  
+  return `✅ Aligned height of ${successCount} object(s) to anchor (${Math.round(targetHeight / 72 * 100) / 100}")`;
+}
+
+/**
+ * Align Both - Makes all selected objects have the same width AND height as the anchor
+ * 
+ * How it works:
+ * 1. Identifies the anchor object (using Set Anchor or fallback to last element)
+ * 2. Gets the anchor's width and height
+ * 3. Sets all other selected objects to that same width and height (keeps their position)
+ * 
+ * Example:
+ * - Anchor: 200 x 150 points
+ * - Object A: 180 x 100 → becomes 200 x 150
+ * - Object B: 250 x 200 → becomes 200 x 150
+ * 
+ * Use cases:
+ * - Creating perfectly uniform elements
+ * - Making all icons exactly the same size
+ * - Standardizing photo dimensions
+ * 
+ * @returns {string} Status message
+ */
+function alignBoth() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to align size';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetWidth = anchor.getWidth();
+  const targetHeight = anchor.getHeight();
+  
+  // Align both dimensions of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      element.setWidth(targetWidth);
+      element.setHeight(targetHeight);
+      successCount++;
+    } catch (e) {
+      // Skip elements that don't support setWidth/setHeight
+    }
+  }
+  
+  const widthInches = Math.round(targetWidth / 72 * 100) / 100;
+  const heightInches = Math.round(targetHeight / 72 * 100) / 100;
+  return `✅ Aligned size of ${successCount} object(s) to anchor (${widthInches}" × ${heightInches}")`;
+}
+
+// ============================================================================
+// STRETCH OBJECTS
+// ============================================================================
+
+/**
+ * Stretch Left - Extends objects' left edge to match anchor's left edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its left edge to align with anchor's left edge
+ * 3. Right edge stays fixed (object grows/shrinks leftward)
+ * 
+ * Example:
+ * - Anchor left edge: 100 points
+ * - Object left edge: 150 points, right edge: 300 points
+ * - After: left edge: 100 points, right edge: 300 points (width increased by 50)
+ * 
+ * Use cases:
+ * - Extending objects to a common left boundary
+ * - Creating left-aligned blocks with consistent left edge
+ * 
+ * @returns {string} Status message
+ */
+function stretchLeft() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to stretch';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetLeft = anchor.getLeft();
+  
+  // Stretch left edge of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentLeft = element.getLeft();
+      const currentRight = currentLeft + element.getWidth();
+      const newWidth = currentRight - targetLeft;
+      
+      if (newWidth > 0) {
+        element.setLeft(targetLeft);
+        element.setWidth(newWidth);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return `✅ Stretched left edge of ${successCount} object(s) to anchor`;
+}
+
+/**
+ * Stretch Right - Extends objects' right edge to match anchor's right edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its right edge to align with anchor's right edge
+ * 3. Left edge stays fixed (object grows/shrinks rightward)
+ * 
+ * Example:
+ * - Anchor right edge: 400 points
+ * - Object left edge: 100 points, right edge: 300 points
+ * - After: left edge: 100 points, right edge: 400 points (width increased by 100)
+ * 
+ * Use cases:
+ * - Extending objects to a common right boundary
+ * - Creating right-aligned blocks with consistent right edge
+ * 
+ * @returns {string} Status message
+ */
+function stretchRight() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to stretch';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetRight = anchor.getLeft() + anchor.getWidth();
+  
+  // Stretch right edge of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentLeft = element.getLeft();
+      const newWidth = targetRight - currentLeft;
+      
+      if (newWidth > 0) {
+        element.setWidth(newWidth);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return `✅ Stretched right edge of ${successCount} object(s) to anchor`;
+}
+
+/**
+ * Stretch Top - Extends objects' top edge to match anchor's top edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its top edge to align with anchor's top edge
+ * 3. Bottom edge stays fixed (object grows/shrinks upward)
+ * 
+ * Example:
+ * - Anchor top edge: 100 points
+ * - Object top edge: 150 points, bottom edge: 300 points
+ * - After: top edge: 100 points, bottom edge: 300 points (height increased by 50)
+ * 
+ * Use cases:
+ * - Extending objects to a common top boundary
+ * - Creating top-aligned blocks with consistent top edge
+ * 
+ * @returns {string} Status message
+ */
+function stretchTop() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to stretch';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetTop = anchor.getTop();
+  
+  // Stretch top edge of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentTop = element.getTop();
+      const currentBottom = currentTop + element.getHeight();
+      const newHeight = currentBottom - targetTop;
+      
+      if (newHeight > 0) {
+        element.setTop(targetTop);
+        element.setHeight(newHeight);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return `✅ Stretched top edge of ${successCount} object(s) to anchor`;
+}
+
+/**
+ * Stretch Bottom - Extends objects' bottom edge to match anchor's bottom edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its bottom edge to align with anchor's bottom edge
+ * 3. Top edge stays fixed (object grows/shrinks downward)
+ * 
+ * Example:
+ * - Anchor bottom edge: 400 points
+ * - Object top edge: 100 points, bottom edge: 300 points
+ * - After: top edge: 100 points, bottom edge: 400 points (height increased by 100)
+ * 
+ * Use cases:
+ * - Extending objects to a common bottom boundary
+ * - Creating bottom-aligned blocks with consistent bottom edge
+ * 
+ * @returns {string} Status message
+ */
+function stretchBottom() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to stretch';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const targetBottom = anchor.getTop() + anchor.getHeight();
+  
+  // Stretch bottom edge of all non-anchor elements
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentTop = element.getTop();
+      const newHeight = targetBottom - currentTop;
+      
+      if (newHeight > 0) {
+        element.setHeight(newHeight);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return `✅ Stretched bottom edge of ${successCount} object(s) to anchor`;
+}
+
+// ============================================================================
+// FILL SPACE
+// ============================================================================
+
+/**
+ * Fill Left - Stretches objects to fill the gap between them and the anchor's right edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its left edge until it reaches the anchor's right edge
+ * 3. Right edge of the object stays fixed
+ * 4. If object is already past the anchor, no change occurs
+ * 
+ * Example:
+ * - Anchor right edge: 200 points
+ * - Object left edge: 300 points, right edge: 400 points
+ * - After: left edge: 200 points, right edge: 400 points (filled 100-point gap)
+ * 
+ * Use cases:
+ * - Filling horizontal space between two objects
+ * - Creating connectors between elements
+ * - Extending backgrounds to meet boundaries
+ * 
+ * @returns {string} Status message
+ */
+function fillLeft() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to fill space';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const anchorRight = anchor.getLeft() + anchor.getWidth();
+  
+  // Fill left: extend left edge to anchor's right edge
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentLeft = element.getLeft();
+      const currentRight = currentLeft + element.getWidth();
+      
+      // Only fill if there's a gap (object is to the right of anchor)
+      if (currentLeft > anchorRight) {
+        const newWidth = currentRight - anchorRight;
+        element.setLeft(anchorRight);
+        element.setWidth(newWidth);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return successCount > 0 
+    ? `✅ Filled left space for ${successCount} object(s) to anchor`
+    : '⚠️ No gaps found to fill (objects may already overlap anchor)';
+}
+
+/**
+ * Fill Right - Stretches objects to fill the gap between them and the anchor's left edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its right edge until it reaches the anchor's left edge
+ * 3. Left edge of the object stays fixed
+ * 4. If object is already past the anchor, no change occurs
+ * 
+ * Example:
+ * - Anchor left edge: 300 points
+ * - Object left edge: 100 points, right edge: 200 points
+ * - After: left edge: 100 points, right edge: 300 points (filled 100-point gap)
+ * 
+ * Use cases:
+ * - Filling horizontal space between two objects
+ * - Creating connectors between elements
+ * - Extending backgrounds to meet boundaries
+ * 
+ * @returns {string} Status message
+ */
+function fillRight() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to fill space';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const anchorLeft = anchor.getLeft();
+  
+  // Fill right: extend right edge to anchor's left edge
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentLeft = element.getLeft();
+      const currentRight = currentLeft + element.getWidth();
+      
+      // Only fill if there's a gap (object is to the left of anchor)
+      if (currentRight < anchorLeft) {
+        const newWidth = anchorLeft - currentLeft;
+        element.setWidth(newWidth);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return successCount > 0 
+    ? `✅ Filled right space for ${successCount} object(s) to anchor`
+    : '⚠️ No gaps found to fill (objects may already overlap anchor)';
+}
+
+/**
+ * Fill Top - Stretches objects to fill the gap between them and the anchor's bottom edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its top edge until it reaches the anchor's bottom edge
+ * 3. Bottom edge of the object stays fixed
+ * 4. If object is already past the anchor, no change occurs
+ * 
+ * Example:
+ * - Anchor bottom edge: 200 points
+ * - Object top edge: 300 points, bottom edge: 400 points
+ * - After: top edge: 200 points, bottom edge: 400 points (filled 100-point gap)
+ * 
+ * Use cases:
+ * - Filling vertical space between two objects
+ * - Creating vertical connectors
+ * - Extending backgrounds vertically
+ * 
+ * @returns {string} Status message
+ */
+function fillTop() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to fill space';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const anchorBottom = anchor.getTop() + anchor.getHeight();
+  
+  // Fill top: extend top edge to anchor's bottom edge
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentTop = element.getTop();
+      const currentBottom = currentTop + element.getHeight();
+      
+      // Only fill if there's a gap (object is below anchor)
+      if (currentTop > anchorBottom) {
+        const newHeight = currentBottom - anchorBottom;
+        element.setTop(anchorBottom);
+        element.setHeight(newHeight);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return successCount > 0 
+    ? `✅ Filled top space for ${successCount} object(s) to anchor`
+    : '⚠️ No gaps found to fill (objects may already overlap anchor)';
+}
+
+/**
+ * Fill Bottom - Stretches objects to fill the gap between them and the anchor's top edge
+ * 
+ * How it works:
+ * 1. Identifies the anchor object
+ * 2. For each selected object, extends its bottom edge until it reaches the anchor's top edge
+ * 3. Top edge of the object stays fixed
+ * 4. If object is already past the anchor, no change occurs
+ * 
+ * Example:
+ * - Anchor top edge: 300 points
+ * - Object top edge: 100 points, bottom edge: 200 points
+ * - After: top edge: 100 points, bottom edge: 300 points (filled 100-point gap)
+ * 
+ * Use cases:
+ * - Filling vertical space between two objects
+ * - Creating vertical connectors
+ * - Extending backgrounds vertically
+ * 
+ * @returns {string} Status message
+ */
+function fillBottom() {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length < 2) {
+    return '⚠️ Please select at least 2 objects to fill space';
+  }
+  
+  // Get anchor element
+  const anchor = getAnchorOrFallback(elements);
+  const anchorTop = anchor.getTop();
+  
+  // Fill bottom: extend bottom edge to anchor's top edge
+  let successCount = 0;
+  for (const element of elements) {
+    // Skip the anchor itself
+    if (element.getObjectId() === anchor.getObjectId()) {
+      continue;
+    }
+    
+    try {
+      const currentTop = element.getTop();
+      const currentBottom = currentTop + element.getHeight();
+      
+      // Only fill if there's a gap (object is above anchor)
+      if (currentBottom < anchorTop) {
+        const newHeight = anchorTop - currentTop;
+        element.setHeight(newHeight);
+        successCount++;
+      }
+    } catch (e) {
+      // Skip elements that don't support these operations
+    }
+  }
+  
+  return successCount > 0 
+    ? `✅ Filled bottom space for ${successCount} object(s) to anchor`
+    : '⚠️ No gaps found to fill (objects may already overlap anchor)';
+}
+
+// ============================================================================
+// MAGIC RESIZER
+// ============================================================================
+
+/**
+ * Show Magic Resizer Dialog - Displays a dialog for user to input resize percentage
+ * 
+ * This function creates an HTML dialog that prompts the user for a percentage value.
+ * The percentage is then used to scale selected objects proportionally.
+ * 
+ * Examples:
+ * - 100% = no change (original size)
+ * - 50% = half the current size
+ * - 200% = double the current size
+ * - 120% = 20% larger
+ * 
+ * @returns {string} Status message
+ */
+function showMagicResizerDialog() {
+  const htmlOutput = HtmlService.createHtmlOutput(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <base target="_top">
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          padding: 20px;
+          margin: 0;
+        }
+        h3 {
+          margin-top: 0;
+          color: #1a73e8;
+        }
+        .input-group {
+          margin: 20px 0;
+        }
+        label {
+          display: block;
+          margin-bottom: 8px;
+          font-weight: bold;
+          color: #333;
+        }
+        input[type="number"] {
+          width: 100%;
+          padding: 10px;
+          font-size: 16px;
+          border: 2px solid #ddd;
+          border-radius: 4px;
+          box-sizing: border-box;
+        }
+        input[type="number"]:focus {
+          outline: none;
+          border-color: #1a73e8;
+        }
+        .button-group {
+          margin-top: 20px;
+          display: flex;
+          gap: 10px;
+        }
+        button {
+          flex: 1;
+          padding: 12px;
+          font-size: 14px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+        .apply-btn {
+          background-color: #1a73e8;
+          color: white;
+        }
+        .apply-btn:hover {
+          background-color: #1557b0;
+        }
+        .cancel-btn {
+          background-color: #f1f3f4;
+          color: #333;
+        }
+        .cancel-btn:hover {
+          background-color: #e0e0e0;
+        }
+        .examples {
+          margin-top: 15px;
+          padding: 12px;
+          background-color: #f8f9fa;
+          border-radius: 4px;
+          font-size: 13px;
+          color: #555;
+        }
+        .examples strong {
+          color: #333;
+        }
+        .status {
+          margin-top: 15px;
+          padding: 10px;
+          border-radius: 4px;
+          display: none;
+        }
+        .status.success {
+          background-color: #d4edda;
+          color: #155724;
+          display: block;
+        }
+        .status.error {
+          background-color: #f8d7da;
+          color: #721c24;
+          display: block;
+        }
+      </style>
+    </head>
+    <body>
+      <h3>🪄 Magic Resizer</h3>
+      
+      <div class="input-group">
+        <label for="percentage">Resize Percentage:</label>
+        <input type="number" id="percentage" value="100" min="1" max="1000" step="1" autofocus>
+      </div>
+      
+      <div class="examples">
+        <strong>Examples:</strong><br>
+        • 100% = no change (current size)<br>
+        • 50% = half size<br>
+        • 200% = double size<br>
+        • 120% = 20% larger<br>
+        • 75% = 25% smaller
+      </div>
+      
+      <div class="button-group">
+        <button class="cancel-btn" onclick="google.script.host.close()">Cancel</button>
+        <button class="apply-btn" onclick="applyResize()">Apply</button>
+      </div>
+      
+      <div id="status" class="status"></div>
+      
+      <script>
+        // Allow Enter key to submit
+        document.getElementById('percentage').addEventListener('keypress', function(e) {
+          if (e.key === 'Enter') {
+            applyResize();
+          }
+        });
+        
+        function applyResize() {
+          const percentage = parseFloat(document.getElementById('percentage').value);
+          const statusDiv = document.getElementById('status');
+          
+          if (isNaN(percentage) || percentage <= 0) {
+            statusDiv.className = 'status error';
+            statusDiv.textContent = '⚠️ Please enter a valid percentage greater than 0';
+            return;
+          }
+          
+          // Disable button while processing
+          const applyBtn = document.querySelector('.apply-btn');
+          applyBtn.disabled = true;
+          applyBtn.textContent = 'Applying...';
+          
+          // Call server-side function
+          google.script.run
+            .withSuccessHandler(function(result) {
+              statusDiv.className = 'status success';
+              statusDiv.textContent = result;
+              setTimeout(function() {
+                google.script.host.close();
+              }, 1500);
+            })
+            .withFailureHandler(function(error) {
+              statusDiv.className = 'status error';
+              statusDiv.textContent = '❌ Error: ' + error.message;
+              applyBtn.disabled = false;
+              applyBtn.textContent = 'Apply';
+            })
+            .applyMagicResize(percentage);
+        }
+      </script>
+    </body>
+    </html>
+  `)
+    .setWidth(400)
+    .setHeight(350);
+  
+  SlidesApp.getUi().showModalDialog(htmlOutput, 'Magic Resizer');
+  return ''; // Dialog handles its own status messages
+}
+
+/**
+ * Apply Magic Resize - Scales selected objects by the given percentage
+ * 
+ * How it works:
+ * 1. Gets all selected objects
+ * 2. For each object, multiplies its width and height by (percentage / 100)
+ * 3. Keeps the top-left corner in the same position
+ * 
+ * Examples:
+ * - Object: 200 x 100 points
+ * - 50% resize: becomes 100 x 50 points
+ * - 200% resize: becomes 400 x 200 points
+ * - 120% resize: becomes 240 x 120 points
+ * 
+ * @param {number} percentage - The percentage to resize by (100 = no change)
+ * @returns {string} Status message
+ */
+function applyMagicResize(percentage) {
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const elements = selection ? selection.getPageElementRange()?.getPageElements() : null;
+  
+  if (!elements || elements.length === 0) {
+    return '⚠️ Please select at least 1 object to resize';
+  }
+  
+  const factor = percentage / 100;
+  let successCount = 0;
+  
+  for (const element of elements) {
+    try {
+      const currentWidth = element.getWidth();
+      const currentHeight = element.getHeight();
+      
+      const newWidth = currentWidth * factor;
+      const newHeight = currentHeight * factor;
+      
+      element.setWidth(newWidth);
+      element.setHeight(newHeight);
+      successCount++;
+    } catch (e) {
+      // Skip elements that don't support resize
+    }
+  }
+  
+  return `✅ Resized ${successCount} object(s) to ${percentage}% of original size`;
 }

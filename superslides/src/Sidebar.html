@@ -110,7 +110,18 @@
     <hr>
 
     <!-- 
-      ALIGNMENT CONTROLS
+      POSITION & ALIGNMENT SECTION
+      
+      This section contains all position and alignment features:
+      1. Basic alignment (edges and centers)
+      2. Position manipulation (swap)
+      3. Distribution (equal spacing)
+      4. Docking (touch edges)
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Position & Alignment</h4>
+
+    <!-- 
+      BASIC ALIGNMENT
       
       These buttons align selected shapes relative to the anchor.
       User should select 2+ shapes before clicking.
@@ -131,6 +142,41 @@
     <button onclick="runAlignTop()">Align Top</button>
     <button onclick="runAlignBottom()">Align Bottom</button>
     <button onclick="runAlignMiddle()">Align Middle</button>
+
+    <!-- 
+      POSITION MANIPULATION
+      
+      Swap Positions: Exchange the positions of exactly 2 selected shapes.
+      Only position (left, top) is swapped - size and styling remain unchanged.
+    -->
+    <button onclick="runSwapPositions()">Swap Positions</button>
+
+    <!-- 
+      DISTRIBUTION
+      
+      Distribute shapes with equal spacing between them.
+      - Horizontal: Equal gaps from left to right
+      - Vertical: Equal gaps from top to bottom
+      
+      Requires at least 3 shapes. Leftmost/rightmost (or topmost/bottommost) 
+      shapes stay fixed as anchors.
+    -->
+    <button onclick="runDistributeHorizontally()">Distribute Horizontally</button>
+    <button onclick="runDistributeVertically()">Distribute Vertically</button>
+
+    <!-- 
+      DOCKING
+      
+      Move shapes until they "touch" the anchor's edges.
+      Creates precisely aligned layouts with no gaps.
+      
+      All docking operations require an anchor (use Set Anchor first).
+      Multiple shapes will stack at the same position.
+    -->
+    <button onclick="runDockLeft()">Dock Left</button>
+    <button onclick="runDockRight()">Dock Right</button>
+    <button onclick="runDockTop()">Dock Top</button>
+    <button onclick="runDockBottom()">Dock Bottom</button>
 
     <hr>
 
@@ -208,6 +254,133 @@
     <label for="matrixSpacing" style="font-size: 12px; color: #666;">Spacing (points):</label>
     <input type="number" id="matrixSpacing" value="20" min="0" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
     <button onclick="runArrangeMatrix()">Arrange in Matrix</button>
+
+    <hr>
+
+    <!-- 
+      SLIDE LAYOUT SECTION
+      
+      Quickly insert common slide layouts with pre-formatted text boxes.
+      
+      Features:
+      - Insert 2, 3, or 4 column layouts with title and content boxes
+      - Insert footnote bars at the bottom of slides
+      - All text boxes are properly positioned and formatted
+      
+      Column layouts include:
+      - Title boxes: 1 inch tall, 16pt bold text
+      - Content boxes: 3 inches tall, 14pt text
+      - Gap between title and content: 0.05 inches
+      - Gap between columns: 0.2 inches
+      
+      Usage:
+      1. Click on a slide in the main canvas
+      2. Click one of the column layout buttons (2, 3, or 4 columns)
+      3. The text boxes will be automatically inserted and formatted
+      4. Edit the placeholder text as needed
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Slide Layout</h4>
+    <button onclick="runInsertTwoColumns()">Insert 2 Columns</button>
+    <button onclick="runInsertThreeColumns()">Insert 3 Columns</button>
+    <button onclick="runInsertFourColumns()">Insert 4 Columns</button>
+    <button onclick="runInsertFootnote()">Insert Footnote</button>
+
+    <hr>
+
+    <!--
+      SIZE MANIPULATION SECTION
+
+      Align the size of selected objects to match the anchor's dimensions.
+
+      Features:
+      - Align Width: Make all selected objects the same width as anchor
+      - Align Height: Make all selected objects the same height as anchor
+      - Align Both: Make all selected objects the same width AND height as anchor
+
+      Usage:
+      1. Select 2 or more objects
+      2. (Optional) Set an anchor, or the last selected object will be used
+      3. Click one of the size alignment buttons
+      4. All non-anchor objects will be resized to match the anchor's dimensions
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Size Manipulation</h4>
+    <button onclick="runAlignWidth()">Align Width</button>
+    <button onclick="runAlignHeight()">Align Height</button>
+    <button onclick="runAlignBoth()">Align Both</button>
+
+    <hr>
+
+    <!--
+      STRETCH OBJECTS SECTION
+
+      Stretch selected objects to align their edges with the anchor's edges.
+      Unlike "Align Size", this extends one edge while keeping the opposite edge fixed.
+
+      Features:
+      - Stretch Left: Extend left edge to anchor's left (right edge stays)
+      - Stretch Right: Extend right edge to anchor's right (left edge stays)
+      - Stretch Top: Extend top edge to anchor's top (bottom edge stays)
+      - Stretch Bottom: Extend bottom edge to anchor's bottom (top edge stays)
+
+      Usage:
+      1. Select 2 or more objects
+      2. (Optional) Set an anchor, or the last selected object will be used
+      3. Click one of the stretch buttons
+      4. Selected objects will extend in that direction to match the anchor's edge
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Stretch Objects</h4>
+    <button onclick="runStretchLeft()">Stretch Left</button>
+    <button onclick="runStretchRight()">Stretch Right</button>
+    <button onclick="runStretchTop()">Stretch Top</button>
+    <button onclick="runStretchBottom()">Stretch Bottom</button>
+
+    <hr>
+
+    <!--
+      FILL SPACE SECTION
+
+      Fill the gap between selected objects and the anchor by stretching.
+      Only works when there is actual space/gap between the objects.
+
+      Features:
+      - Fill Left: Stretch left until touching anchor's right edge
+      - Fill Right: Stretch right until touching anchor's left edge
+      - Fill Top: Stretch up until touching anchor's bottom edge
+      - Fill Bottom: Stretch down until touching anchor's top edge
+
+      Usage:
+      1. Select 2 or more objects with gaps between them
+      2. (Optional) Set an anchor, or the last selected object will be used
+      3. Click one of the fill buttons
+      4. Objects will stretch to close the gap with the anchor
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Fill Space</h4>
+    <button onclick="runFillLeft()">Fill Left</button>
+    <button onclick="runFillRight()">Fill Right</button>
+    <button onclick="runFillTop()">Fill Top</button>
+    <button onclick="runFillBottom()">Fill Bottom</button>
+
+    <hr>
+
+    <!--
+      MAGIC RESIZER SECTION
+
+      Scale selected objects by a percentage factor.
+      Opens an interactive dialog for precise control.
+
+      Features:
+      - User inputs a percentage (e.g., 50%, 120%, 200%)
+      - All selected objects are scaled proportionally
+      - 100% = no change, 50% = half size, 200% = double size
+
+      Usage:
+      1. Select 1 or more objects
+      2. Click "Magic Resizer" button
+      3. Enter desired percentage in the dialog
+      4. Click "Apply" to resize
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Magic Resizer</h4>
+    <button onclick="runMagicResizer()">Magic Resizer</button>
 
     <hr>
 
@@ -457,6 +630,185 @@
       }
 
       /**
+       * runSwapPositions()
+       *
+       * Called when user clicks "Swap Positions" button.
+       * 
+       * Swaps the positions of exactly two selected shapes.
+       * Only position (left, top) is swapped - size, rotation, and styling remain unchanged.
+       * 
+       * Requires exactly 2 shapes to be selected.
+       */
+      function runSwapPositions() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Swapping positions…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Swapped.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .swapPositions();
+      }
+
+      /**
+       * runDistributeHorizontally()
+       *
+       * Called when user clicks "Distribute Horizontally" button.
+       * 
+       * Distributes selected shapes evenly across horizontal space with equal gaps.
+       * The leftmost and rightmost shapes stay fixed; middle shapes are repositioned.
+       * 
+       * Requires at least 3 shapes to be selected.
+       */
+      function runDistributeHorizontally() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Distributing horizontally…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Distributed.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .distributeHorizontally();
+      }
+
+      /**
+       * runDistributeVertically()
+       *
+       * Called when user clicks "Distribute Vertically" button.
+       * 
+       * Distributes selected shapes evenly across vertical space with equal gaps.
+       * The topmost and bottommost shapes stay fixed; middle shapes are repositioned.
+       * 
+       * Requires at least 3 shapes to be selected.
+       */
+      function runDistributeVertically() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Distributing vertically…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Distributed.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .distributeVertically();
+      }
+
+      /**
+       * runDockLeft()
+       *
+       * Called when user clicks "Dock Left" button.
+       * 
+       * Moves selected shapes until their RIGHT edges touch the anchor's LEFT edge.
+       * Creates a "docked to the left" effect.
+       * 
+       * Note: Multiple shapes will stack at the same position.
+       * Requires at least 2 shapes (anchor + shapes to dock).
+       */
+      function runDockLeft() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Docking left…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Docked.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .dockLeft();
+      }
+
+      /**
+       * runDockRight()
+       *
+       * Called when user clicks "Dock Right" button.
+       * 
+       * Moves selected shapes until their LEFT edges touch the anchor's RIGHT edge.
+       * Creates a "docked to the right" effect.
+       * 
+       * Note: Multiple shapes will stack at the same position.
+       * Requires at least 2 shapes (anchor + shapes to dock).
+       */
+      function runDockRight() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Docking right…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Docked.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .dockRight();
+      }
+
+      /**
+       * runDockTop()
+       *
+       * Called when user clicks "Dock Top" button.
+       * 
+       * Moves selected shapes until their BOTTOM edges touch the anchor's TOP edge.
+       * Creates a "docked above" effect.
+       * 
+       * Note: Multiple shapes will stack at the same position.
+       * Requires at least 2 shapes (anchor + shapes to dock).
+       */
+      function runDockTop() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Docking top…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Docked.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .dockTop();
+      }
+
+      /**
+       * runDockBottom()
+       *
+       * Called when user clicks "Dock Bottom" button.
+       * 
+       * Moves selected shapes until their TOP edges touch the anchor's BOTTOM edge.
+       * Creates a "docked below" effect.
+       * 
+       * Note: Multiple shapes will stack at the same position.
+       * Requires at least 2 shapes (anchor + shapes to dock).
+       */
+      function runDockBottom() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Docking bottom…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Docked.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .dockBottom();
+      }
+
+      /**
        * showTableAlignDialog()
        *
        * Shows the modal dialog for table alignment options.
@@ -554,6 +906,378 @@
               '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
           })
           .arrangeMatrix(rows, cols, spacing);
+      }
+
+      /**
+       * runInsertTwoColumns()
+       *
+       * Called when user clicks "Insert 2 Columns" button.
+       * 
+       * Inserts a 2-column layout with title and content boxes.
+       * Each column has a title box (Header 1, Header 2) and content box (Content 1, Content 2).
+       * 
+       * Requirements:
+       * - User must have a slide selected (not master or layout)
+       */
+      function runInsertTwoColumns() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Inserting 2 columns…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Inserted.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .insertTwoColumns();
+      }
+
+      /**
+       * runInsertThreeColumns()
+       *
+       * Called when user clicks "Insert 3 Columns" button.
+       * 
+       * Inserts a 3-column layout with title and content boxes.
+       * Each column has a title box (Header 1, 2, 3) and content box (Content 1, 2, 3).
+       * 
+       * Requirements:
+       * - User must have a slide selected (not master or layout)
+       */
+      function runInsertThreeColumns() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Inserting 3 columns…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Inserted.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .insertThreeColumns();
+      }
+
+      /**
+       * runInsertFourColumns()
+       *
+       * Called when user clicks "Insert 4 Columns" button.
+       * 
+       * Inserts a 4-column layout with title and content boxes.
+       * Each column has a title box (Header 1-4) and content box (Content 1-4).
+       * 
+       * Note: With 4 columns, each column is narrower (~2.125 inches).
+       * Consider using shorter text if content doesn't fit.
+       * 
+       * Requirements:
+       * - User must have a slide selected (not master or layout)
+       */
+      function runInsertFourColumns() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Inserting 4 columns…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Inserted.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .insertFourColumns();
+      }
+
+      /**
+       * runInsertFootnote()
+       *
+       * Called when user clicks "Insert Footnote" button.
+       * 
+       * Inserts a footnote text box at the bottom of the slide.
+       * The footnote box is positioned at 4.8 inches from the top, spanning 9 inches wide.
+       * 
+       * Default text: "Footnote: 1. commentary 1, 2. commentary 2, 3. commentary 3"
+       * Font size: 12pt
+       * 
+       * The text is fully editable after insertion - replace with your actual footnotes.
+       * 
+       * Requirements:
+       * - User must have a slide selected (not master or layout)
+       */
+      function runInsertFootnote() {
+        // Immediate feedback
+        document.getElementById('status').innerText = 'Inserting footnote…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Inserted.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .insertFootnote();
+      }
+
+      // ====================================================================
+      // SIZE MANIPULATION
+      // ====================================================================
+
+      /**
+       * runAlignWidth()
+       * 
+       * Aligns the width of all selected objects to match the anchor's width.
+       * Position and height remain unchanged.
+       */
+      function runAlignWidth() {
+        document.getElementById('status').innerText = 'Aligning width…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Width aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignWidth();
+      }
+
+      /**
+       * runAlignHeight()
+       * 
+       * Aligns the height of all selected objects to match the anchor's height.
+       * Position and width remain unchanged.
+       */
+      function runAlignHeight() {
+        document.getElementById('status').innerText = 'Aligning height…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Height aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignHeight();
+      }
+
+      /**
+       * runAlignBoth()
+       * 
+       * Aligns both width AND height of all selected objects to match the anchor.
+       * Position remains unchanged, but size becomes identical to anchor.
+       */
+      function runAlignBoth() {
+        document.getElementById('status').innerText = 'Aligning size (both)…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Size aligned.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .alignBoth();
+      }
+
+      // ====================================================================
+      // STRETCH OBJECTS
+      // ====================================================================
+
+      /**
+       * runStretchLeft()
+       * 
+       * Extends objects' left edge to match anchor's left edge.
+       * Right edge stays fixed (objects grow/shrink leftward).
+       */
+      function runStretchLeft() {
+        document.getElementById('status').innerText = 'Stretching left…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Stretched left.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .stretchLeft();
+      }
+
+      /**
+       * runStretchRight()
+       * 
+       * Extends objects' right edge to match anchor's right edge.
+       * Left edge stays fixed (objects grow/shrink rightward).
+       */
+      function runStretchRight() {
+        document.getElementById('status').innerText = 'Stretching right…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Stretched right.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .stretchRight();
+      }
+
+      /**
+       * runStretchTop()
+       * 
+       * Extends objects' top edge to match anchor's top edge.
+       * Bottom edge stays fixed (objects grow/shrink upward).
+       */
+      function runStretchTop() {
+        document.getElementById('status').innerText = 'Stretching top…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Stretched top.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .stretchTop();
+      }
+
+      /**
+       * runStretchBottom()
+       * 
+       * Extends objects' bottom edge to match anchor's bottom edge.
+       * Top edge stays fixed (objects grow/shrink downward).
+       */
+      function runStretchBottom() {
+        document.getElementById('status').innerText = 'Stretching bottom…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Stretched bottom.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .stretchBottom();
+      }
+
+      // ====================================================================
+      // FILL SPACE
+      // ====================================================================
+
+      /**
+       * runFillLeft()
+       * 
+       * Stretches objects to fill the gap between them and the anchor's right edge.
+       * Only works when there is space between the object and anchor.
+       */
+      function runFillLeft() {
+        document.getElementById('status').innerText = 'Filling left space…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Filled left.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .fillLeft();
+      }
+
+      /**
+       * runFillRight()
+       * 
+       * Stretches objects to fill the gap between them and the anchor's left edge.
+       * Only works when there is space between the object and anchor.
+       */
+      function runFillRight() {
+        document.getElementById('status').innerText = 'Filling right space…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Filled right.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .fillRight();
+      }
+
+      /**
+       * runFillTop()
+       * 
+       * Stretches objects to fill the gap between them and the anchor's bottom edge.
+       * Only works when there is space between the object and anchor.
+       */
+      function runFillTop() {
+        document.getElementById('status').innerText = 'Filling top space…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Filled top.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .fillTop();
+      }
+
+      /**
+       * runFillBottom()
+       * 
+       * Stretches objects to fill the gap between them and the anchor's top edge.
+       * Only works when there is space between the object and anchor.
+       */
+      function runFillBottom() {
+        document.getElementById('status').innerText = 'Filling bottom space…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Filled bottom.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .fillBottom();
+      }
+
+      // ====================================================================
+      // MAGIC RESIZER
+      // ====================================================================
+
+      /**
+       * runMagicResizer()
+       * 
+       * Opens a dialog for the user to input a percentage to resize selected objects.
+       * Examples: 50% = half size, 200% = double size, 120% = 20% larger.
+       */
+      function runMagicResizer() {
+        document.getElementById('status').innerText = 'Opening Magic Resizer…';
+        
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            // Dialog handles its own status messages
+            // This handler is mainly for error cases
+            if (msg) {
+              document.getElementById('status').innerText = msg;
+            }
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .showMagicResizerDialog();
       }
 
       // ====================================================================
