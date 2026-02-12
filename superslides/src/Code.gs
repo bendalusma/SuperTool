@@ -1759,6 +1759,616 @@ function alignToTable(alignment, padding) {
   return message;
 }
 
+/**
+ * getSelectedTableForSwap_()
+ *
+ * Resolves which table should be used for table swap operations.
+ *
+ * Resolution strategy:
+ * 1. If the current selection includes exactly one table, use that table.
+ * 2. If no table is selected, but the current slide has exactly one table,
+ *    use that single table as a convenience fallback.
+ * 3. Otherwise, return an explicit error message describing what the user
+ *    needs to do (select one table, or reduce ambiguity).
+ *
+ * Why this helper exists:
+ * - Keeps row and column swap functions focused only on swap logic
+ * - Centralizes table-selection validation in one place
+ * - Ensures both features behave consistently in edge cases
+ *
+ * @returns {Object} { table: Table|null, error: string|null }
+ */
+function getSelectedTableForSwap_() {
+  // Access active presentation and current selection context.
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const range = selection.getPageElementRange();
+
+  // Case 1: User selected page elements directly on slide canvas.
+  if (range) {
+    // Keep only TABLE elements from the selection.
+    const tableElements = range.getPageElements().filter(function (el) {
+      try {
+        return el.getPageElementType() === SlidesApp.PageElementType.TABLE;
+      } catch (e) {
+        // Defensive fallback: skip elements that fail type resolution.
+        return false;
+      }
+    });
+
+    // Exactly one table selected -> unambiguous success.
+    if (tableElements.length === 1) {
+      return {table: tableElements[0].asTable(), error: null};
+    }
+
+    // More than one table selected -> ambiguous, ask for one table only.
+    if (tableElements.length > 1) {
+      return {table: null, error: 'Please select only one table.'};
+    }
+  }
+
+  // Case 2: No selected table. Try slide-level fallback if safe to infer.
+  const currentPage = selection.getCurrentPage();
+  if (currentPage && currentPage.getPageType() === SlidesApp.PageType.SLIDE) {
+    const tables = currentPage.asSlide().getTables();
+
+    // Exactly one table on slide -> use it without forcing explicit selection.
+    if (tables.length === 1) {
+      return {table: tables[0], error: null};
+    }
+  }
+
+  // No valid table context found.
+  return {table: null, error: 'Please select a table first.'};
+}
+
+/**
+ * validateTableIndex_(value, label, max)
+ *
+ * Validates a user-provided 1-based table index (row or column).
+ *
+ * Validation rules:
+ * - Must be a whole number (integer)
+ * - Must be within [1, max] where max is row/column count
+ *
+ * Returns both:
+ * - `index`: normalized numeric value on success
+ * - `error`: human-readable error message on failure
+ *
+ * @param {number} value - Raw index value from UI
+ * @param {string} label - Human-readable label for error messages
+ * @param {number} max - Maximum allowed value
+ * @returns {Object} { index: number|null, error: string|null }
+ */
+function validateTableIndex_(value, label, max) {
+  // Normalize input to Number for safe numeric checks.
+  const index = Number(value);
+
+  // Reject decimals, NaN, and other non-integer inputs.
+  if (!Number.isInteger(index)) {
+    return {index: null, error: `${label} must be a whole number.`};
+  }
+
+  // Enforce 1-based bounds expected by UI.
+  if (index < 1 || index > max) {
+    return {index: null, error: `${label} must be between 1 and ${max}.`};
+  }
+
+  // Validation passed.
+  return {index: index, error: null};
+}
+
+/**
+ * safeGet_(getter)
+ *
+ * Small utility wrapper for API calls that may throw if a style value
+ * isn't explicitly set on a given text range/cell.
+ *
+ * @param {Function} getter - Function that returns a value
+ * @returns {*} Returned value, or null if getter throws
+ */
+function safeGet_(getter) {
+  try {
+    return getter();
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * captureColorSpec_(color)
+ *
+ * Converts a Slides Color object into a lightweight spec that can be
+ * reapplied later without retaining object references.
+ *
+ * @param {Color} color - Slides Color object
+ * @returns {Object|null} { kind: 'rgb'|'theme', value: string|ThemeColorType }
+ */
+function captureColorSpec_(color) {
+  if (!color) {
+    return null;
+  }
+
+  const colorType = safeGet_(function () { return color.getColorType(); });
+  if (colorType === SlidesApp.ColorType.RGB) {
+    const rgb = safeGet_(function () { return color.asRgbColor(); });
+    if (!rgb) {
+      return null;
+    }
+    return {
+      kind: 'rgb',
+      value: safeGet_(function () { return rgb.asHexString(); })
+    };
+  }
+
+  if (colorType === SlidesApp.ColorType.THEME) {
+    const theme = safeGet_(function () { return color.asThemeColor(); });
+    if (!theme) {
+      return null;
+    }
+    return {
+      kind: 'theme',
+      value: safeGet_(function () { return theme.getThemeColorType(); })
+    };
+  }
+
+  return null;
+}
+
+/**
+ * applyTextColorSpec_(textStyle, mode, colorSpec)
+ *
+ * Applies captured color spec to TextStyle foreground/background.
+ *
+ * @param {TextStyle} textStyle - Target text style
+ * @param {string} mode - 'foreground' or 'background'
+ * @param {Object|null} colorSpec - Captured color spec
+ */
+function applyTextColorSpec_(textStyle, mode, colorSpec) {
+  if (!colorSpec || !colorSpec.value) {
+    return;
+  }
+
+  if (mode === 'foreground') {
+    try { textStyle.setForegroundColor(colorSpec.value); } catch (e) {}
+    return;
+  }
+
+  try { textStyle.setBackgroundColor(colorSpec.value); } catch (e) {}
+}
+
+/**
+ * captureTextStyleSnapshot_(textStyle)
+ *
+ * Captures a portable snapshot of text style attributes for a run.
+ * This snapshot is later re-applied to another range when
+ * "keep formatting" is enabled.
+ *
+ * @param {TextStyle} textStyle - Slides TextStyle object
+ * @returns {Object} Serializable style snapshot
+ */
+function captureTextStyleSnapshot_(textStyle) {
+  return {
+    bold: safeGet_(function () { return textStyle.isBold(); }),
+    italic: safeGet_(function () { return textStyle.isItalic(); }),
+    underline: safeGet_(function () { return textStyle.isUnderline(); }),
+    strikethrough: safeGet_(function () { return textStyle.isStrikethrough(); }),
+    smallCaps: safeGet_(function () { return textStyle.isSmallCaps(); }),
+    fontFamily: safeGet_(function () { return textStyle.getFontFamily(); }),
+    fontSize: safeGet_(function () { return textStyle.getFontSize(); }),
+    fontWeight: safeGet_(function () { return textStyle.getFontWeight(); }),
+    baselineOffset: safeGet_(function () { return textStyle.getBaselineOffset(); }),
+    foregroundColor: captureColorSpec_(safeGet_(function () { return textStyle.getForegroundColor(); })),
+    backgroundColor: captureColorSpec_(safeGet_(function () { return textStyle.getBackgroundColor(); })),
+    isBackgroundTransparent: safeGet_(function () { return textStyle.isBackgroundTransparent(); }),
+    linkUrl: safeGet_(function () {
+      const link = textStyle.getLink();
+      return link ? link.getUrl() : null;
+    })
+  };
+}
+
+/**
+ * applyTextStyleSnapshot_(textStyle, snapshot)
+ *
+ * Applies a captured text-style snapshot onto a target TextStyle.
+ * Each setter is isolated in try/catch to keep the swap operation resilient
+ * when specific properties are unsupported on a given range.
+ *
+ * @param {TextStyle} textStyle - Target TextStyle object
+ * @param {Object} snapshot - Style snapshot from captureTextStyleSnapshot_
+ */
+function applyTextStyleSnapshot_(textStyle, snapshot) {
+  try {
+    if (snapshot.linkUrl) {
+      textStyle.setLinkUrl(snapshot.linkUrl);
+    } else {
+      textStyle.removeLink();
+    }
+  } catch (e) {}
+
+  try { if (snapshot.fontFamily !== null && snapshot.fontWeight !== null) { textStyle.setFontFamilyAndWeight(snapshot.fontFamily, snapshot.fontWeight); } } catch (e) {}
+  try { if (snapshot.fontFamily !== null) { textStyle.setFontFamily(snapshot.fontFamily); } } catch (e) {}
+  try { if (snapshot.fontSize !== null) { textStyle.setFontSize(snapshot.fontSize); } } catch (e) {}
+  try { if (snapshot.bold !== null) { textStyle.setBold(snapshot.bold); } } catch (e) {}
+  try { if (snapshot.italic !== null) { textStyle.setItalic(snapshot.italic); } } catch (e) {}
+  try { if (snapshot.underline !== null) { textStyle.setUnderline(snapshot.underline); } } catch (e) {}
+  try { if (snapshot.strikethrough !== null) { textStyle.setStrikethrough(snapshot.strikethrough); } } catch (e) {}
+  try { if (snapshot.smallCaps !== null) { textStyle.setSmallCaps(snapshot.smallCaps); } } catch (e) {}
+  try { if (snapshot.baselineOffset !== null) { textStyle.setBaselineOffset(snapshot.baselineOffset); } } catch (e) {}
+  applyTextColorSpec_(textStyle, 'foreground', snapshot.foregroundColor);
+
+  if (snapshot.isBackgroundTransparent === true) {
+    try { textStyle.setBackgroundColorTransparent(); } catch (e) {}
+  } else if (snapshot.backgroundColor !== null) {
+    applyTextColorSpec_(textStyle, 'background', snapshot.backgroundColor);
+  }
+}
+
+/**
+ * captureParagraphStyleSnapshot_(paragraphStyle)
+ *
+ * Captures paragraph-level styling so it can travel with content when
+ * swapping rows/columns in "keep formatting" mode.
+ *
+ * @param {ParagraphStyle} paragraphStyle - Source paragraph style
+ * @returns {Object} Paragraph style snapshot
+ */
+function captureParagraphStyleSnapshot_(paragraphStyle) {
+  return {
+    lineSpacing: safeGet_(function () { return paragraphStyle.getLineSpacing(); }),
+    spaceAbove: safeGet_(function () { return paragraphStyle.getSpaceAbove(); }),
+    spaceBelow: safeGet_(function () { return paragraphStyle.getSpaceBelow(); }),
+    indentStart: safeGet_(function () { return paragraphStyle.getIndentStart(); }),
+    indentEnd: safeGet_(function () { return paragraphStyle.getIndentEnd(); }),
+    indentFirstLine: safeGet_(function () { return paragraphStyle.getIndentFirstLine(); }),
+    spacingMode: safeGet_(function () { return paragraphStyle.getSpacingMode(); }),
+    paragraphAlignment: safeGet_(function () { return paragraphStyle.getParagraphAlignment(); })
+  };
+}
+
+/**
+ * applyParagraphStyleSnapshot_(paragraphStyle, snapshot)
+ *
+ * Applies a paragraph style snapshot to target paragraph ranges.
+ *
+ * @param {ParagraphStyle} paragraphStyle - Target paragraph style
+ * @param {Object} snapshot - Captured paragraph style data
+ */
+function applyParagraphStyleSnapshot_(paragraphStyle, snapshot) {
+  try { if (snapshot.lineSpacing !== null) { paragraphStyle.setLineSpacing(snapshot.lineSpacing); } } catch (e) {}
+  try { if (snapshot.spaceAbove !== null) { paragraphStyle.setSpaceAbove(snapshot.spaceAbove); } } catch (e) {}
+  try { if (snapshot.spaceBelow !== null) { paragraphStyle.setSpaceBelow(snapshot.spaceBelow); } } catch (e) {}
+  try { if (snapshot.indentStart !== null) { paragraphStyle.setIndentStart(snapshot.indentStart); } } catch (e) {}
+  try { if (snapshot.indentEnd !== null) { paragraphStyle.setIndentEnd(snapshot.indentEnd); } } catch (e) {}
+  try { if (snapshot.indentFirstLine !== null) { paragraphStyle.setIndentFirstLine(snapshot.indentFirstLine); } } catch (e) {}
+  try { if (snapshot.spacingMode !== null) { paragraphStyle.setSpacingMode(snapshot.spacingMode); } } catch (e) {}
+  try { if (snapshot.paragraphAlignment !== null) { paragraphStyle.setParagraphAlignment(snapshot.paragraphAlignment); } } catch (e) {}
+}
+
+/**
+ * captureCellPayload_(cell)
+ *
+ * Captures all swap-relevant data from a table cell:
+ * - text content
+ * - per-run text style
+ * - per-paragraph style
+ * - cell content alignment
+ * - fill state/color
+ *
+ * @param {TableCell} cell - Source table cell
+ * @returns {Object} Captured payload
+ */
+function captureCellPayload_(cell) {
+  const text = cell.getText();
+  const payload = {
+    plainText: text.asString(),
+    contentAlignment: safeGet_(function () { return cell.getContentAlignment(); }),
+    fillVisible: null,
+    fillType: null,
+    fillColor: null,
+    fillAlpha: null,
+    runs: [],
+    paragraphs: []
+  };
+
+  const fill = safeGet_(function () { return cell.getFill(); });
+  if (fill) {
+    payload.fillVisible = safeGet_(function () { return fill.isVisible(); });
+    payload.fillType = safeGet_(function () { return fill.getType(); });
+
+    const solid = safeGet_(function () { return fill.getSolidFill(); });
+    if (solid) {
+      payload.fillColor = captureColorSpec_(safeGet_(function () { return solid.getColor(); }));
+      payload.fillAlpha = safeGet_(function () { return solid.getAlpha(); });
+    }
+  }
+
+  const runs = safeGet_(function () { return text.getRuns(); }) || [];
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    payload.runs.push({
+      start: safeGet_(function () { return run.getStartIndex(); }),
+      end: safeGet_(function () { return run.getEndIndex(); }),
+      style: captureTextStyleSnapshot_(run.getTextStyle())
+    });
+  }
+
+  const paragraphs = safeGet_(function () { return text.getParagraphs(); }) || [];
+  for (let p = 0; p < paragraphs.length; p++) {
+    const paragraph = paragraphs[p];
+    const range = safeGet_(function () { return paragraph.getRange(); });
+    if (!range) {
+      continue;
+    }
+
+    payload.paragraphs.push({
+      start: safeGet_(function () { return range.getStartIndex(); }),
+      end: safeGet_(function () { return range.getEndIndex(); }),
+      style: captureParagraphStyleSnapshot_(range.getParagraphStyle())
+    });
+  }
+
+  return payload;
+}
+
+/**
+ * applyCellPayload_(cell, payload)
+ *
+ * Applies a captured payload onto a target table cell.
+ * Operation order:
+ * 1. Set plain text baseline
+ * 2. Apply fill and cell-level alignment
+ * 3. Reapply paragraph styles
+ * 4. Reapply run-level text styles
+ *
+ * @param {TableCell} cell - Destination cell
+ * @param {Object} payload - Captured payload from captureCellPayload_
+ */
+function applyCellPayload_(cell, payload) {
+  const text = cell.getText();
+  text.setText(payload.plainText || '');
+
+  if (payload.contentAlignment !== null) {
+    try { cell.setContentAlignment(payload.contentAlignment); } catch (e) {}
+  }
+
+  const fill = safeGet_(function () { return cell.getFill(); });
+  if (fill && payload.fillVisible === false) {
+    try { fill.setTransparent(); } catch (e) {}
+  } else if (fill && payload.fillType === SlidesApp.FillType.SOLID && payload.fillColor && payload.fillColor.value) {
+    if (payload.fillAlpha !== null) {
+      try {
+        fill.setSolidFill(payload.fillColor.value, payload.fillAlpha);
+      } catch (e) {
+        try { fill.setSolidFill(payload.fillColor.value); } catch (e2) {}
+      }
+    } else {
+      try { fill.setSolidFill(payload.fillColor.value); } catch (e) {}
+    }
+  }
+
+  const textLength = safeGet_(function () { return text.asString().length; }) || 0;
+  for (let p = 0; p < payload.paragraphs.length; p++) {
+    const paragraph = payload.paragraphs[p];
+    const start = Math.max(0, Math.min(textLength, Number(paragraph.start)));
+    const end = Math.max(0, Math.min(textLength, Number(paragraph.end)));
+
+    if (start >= end) {
+      continue;
+    }
+
+    const range = safeGet_(function () { return text.getRange(start, end); });
+    if (!range) {
+      continue;
+    }
+
+    applyParagraphStyleSnapshot_(range.getParagraphStyle(), paragraph.style);
+  }
+
+  for (let r = 0; r < payload.runs.length; r++) {
+    const run = payload.runs[r];
+    const start = Math.max(0, Math.min(textLength, Number(run.start)));
+    const end = Math.max(0, Math.min(textLength, Number(run.end)));
+
+    if (start >= end) {
+      continue;
+    }
+
+    const range = safeGet_(function () { return text.getRange(start, end); });
+    if (!range) {
+      continue;
+    }
+
+    applyTextStyleSnapshot_(range.getTextStyle(), run.style);
+  }
+}
+
+/**
+ * isMergedCell_(cell)
+ *
+ * Checks whether a cell is in a merged state. Swapping merged cells can produce
+ * ambiguous behavior, so we block those operations and return a clear message.
+ *
+ * @param {TableCell} cell - Target cell
+ * @returns {boolean} True if merged, false otherwise
+ */
+function isMergedCell_(cell) {
+  const mergeState = safeGet_(function () { return cell.getMergeState(); });
+
+  // If merge state cannot be read, treat as non-merged so we don't block swaps.
+  if (!mergeState) {
+    return false;
+  }
+
+  // Avoid direct enum dependency (it can vary in Apps Script surfaces).
+  // We normalize by string value and only treat explicit "NORMAL" as unmerged.
+  const stateString = String(mergeState).toUpperCase();
+  return stateString !== 'NORMAL';
+}
+
+/**
+ * swapCells_(cellA, cellB, keepFormatting)
+ *
+ * Swaps two cells either as plain text (default) or with style payload.
+ *
+ * @param {TableCell} cellA - First cell
+ * @param {TableCell} cellB - Second cell
+ * @param {boolean} keepFormatting - Whether style/fill should move with text
+ * @returns {Object} { ok: boolean, error: string|null }
+ */
+function swapCells_(cellA, cellB, keepFormatting) {
+  if (isMergedCell_(cellA) || isMergedCell_(cellB)) {
+    return {
+      ok: false,
+      error: 'Swap with merged cells is not supported yet. Please unmerge cells first.'
+    };
+  }
+
+  if (!keepFormatting) {
+    const textA = cellA.getText().asString();
+    const textB = cellB.getText().asString();
+    cellA.getText().setText(textB);
+    cellB.getText().setText(textA);
+    return {ok: true, error: null};
+  }
+
+  const payloadA = captureCellPayload_(cellA);
+  const payloadB = captureCellPayload_(cellB);
+  applyCellPayload_(cellA, payloadB);
+  applyCellPayload_(cellB, payloadA);
+
+  return {ok: true, error: null};
+}
+
+/**
+ * swapTableRows(rowA, rowB, keepFormatting)
+ *
+ * Swaps row contents in a selected table.
+ *
+ * Modes:
+ * - keepFormatting = false: swap plain text only (current behavior)
+ * - keepFormatting = true: swap text + text styles + paragraph styles +
+ *   cell fill + cell content alignment
+ *
+ * Note about borders:
+ * - Google Slides Apps Script currently does not expose table-cell border
+ *   setters/getters in the same way as text/fill, so borders cannot be
+ *   programmatically swapped in this implementation.
+ *
+ * @param {number} rowA - First row number (1-based)
+ * @param {number} rowB - Second row number (1-based)
+ * @param {boolean} keepFormatting - Preserve source formatting with content
+ * @returns {string} Status message
+ */
+function swapTableRows(rowA, rowB, keepFormatting) {
+  const tableResult = getSelectedTableForSwap_();
+  if (tableResult.error) {
+    return tableResult.error;
+  }
+
+  const table = tableResult.table;
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+  const preserveFormatting = keepFormatting === true;
+
+  const first = validateTableIndex_(rowA, 'First row', numRows);
+  if (first.error) {
+    return first.error;
+  }
+
+  const second = validateTableIndex_(rowB, 'Second row', numRows);
+  if (second.error) {
+    return second.error;
+  }
+
+  if (first.index === second.index) {
+    return 'Row numbers are identical. Nothing to swap.';
+  }
+
+  const rowIndexA = first.index - 1;
+  const rowIndexB = second.index - 1;
+
+  for (let col = 0; col < numCols; col++) {
+    const cellA = table.getCell(rowIndexA, col);
+    const cellB = table.getCell(rowIndexB, col);
+    const result = swapCells_(cellA, cellB, preserveFormatting);
+
+    if (!result.ok) {
+      return result.error;
+    }
+  }
+
+  if (preserveFormatting) {
+    return `Swapped row ${first.index} with row ${second.index} with source text/cell formatting. Border swap is not supported by Apps Script.`;
+  }
+  return `Swapped row ${first.index} with row ${second.index}.`;
+}
+
+/**
+ * swapTableColumns(colA, colB, keepFormatting)
+ *
+ * Swaps column contents in a selected table.
+ *
+ * Modes:
+ * - keepFormatting = false: swap plain text only (current behavior)
+ * - keepFormatting = true: swap text + text styles + paragraph styles +
+ *   cell fill + cell content alignment
+ *
+ * Note about borders:
+ * - Google Slides Apps Script currently does not expose table-cell border
+ *   setters/getters in the same way as text/fill, so borders cannot be
+ *   programmatically swapped in this implementation.
+ *
+ * @param {number} colA - First column number (1-based)
+ * @param {number} colB - Second column number (1-based)
+ * @param {boolean} keepFormatting - Preserve source formatting with content
+ * @returns {string} Status message
+ */
+function swapTableColumns(colA, colB, keepFormatting) {
+  const tableResult = getSelectedTableForSwap_();
+  if (tableResult.error) {
+    return tableResult.error;
+  }
+
+  const table = tableResult.table;
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+  const preserveFormatting = keepFormatting === true;
+
+  const first = validateTableIndex_(colA, 'First column', numCols);
+  if (first.error) {
+    return first.error;
+  }
+
+  const second = validateTableIndex_(colB, 'Second column', numCols);
+  if (second.error) {
+    return second.error;
+  }
+
+  if (first.index === second.index) {
+    return 'Column numbers are identical. Nothing to swap.';
+  }
+
+  const colIndexA = first.index - 1;
+  const colIndexB = second.index - 1;
+
+  for (let row = 0; row < numRows; row++) {
+    const cellA = table.getCell(row, colIndexA);
+    const cellB = table.getCell(row, colIndexB);
+    const result = swapCells_(cellA, cellB, preserveFormatting);
+
+    if (!result.ok) {
+      return result.error;
+    }
+  }
+
+  if (preserveFormatting) {
+    return `Swapped column ${first.index} with column ${second.index} with source text/cell formatting. Border swap is not supported by Apps Script.`;
+  }
+  return `Swapped column ${first.index} with column ${second.index}.`;
+}
+
 
 // ============================================================================
 // MATRIX ALIGNMENT

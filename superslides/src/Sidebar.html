@@ -192,9 +192,17 @@
       
       Shapes are aligned within their cells, not relative to each other.
       Multiple shapes in the same cell are stacked vertically.
+
+      NEW TABLE SWAP FEATURES:
+      - Swap Rows in Table: exchange contents of two row indices
+      - Swap Columns in Table: exchange contents of two column indices
+      - Uses 1-based indexing in UI for user-friendly input
+      - Designed to avoid cut/paste workflows that can alter formatting context
     -->
     <h4 style="margin-top: 16px; margin-bottom: 8px;">Table Alignment</h4>
     <button onclick="showTableAlignDialog()">Align in Table</button>
+    <button onclick="showTableSwapDialog('row')">Swap Rows in Table</button>
+    <button onclick="showTableSwapDialog('column')">Swap Columns in Table</button>
     
     <!-- Modal Dialog for Table Alignment -->
     <div id="tableAlignModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
@@ -225,6 +233,49 @@
         <div style="display: flex; gap: 8px; justify-content: flex-end;">
           <button onclick="hideTableAlignDialog()" style="background: #ddd; color: #333;">Cancel</button>
           <button onclick="runTableAlign()" style="background: #4285f4; color: white;">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      Modal Dialog for Table Row/Column Swap
+
+      This dialog is reused for both operations:
+      - Row mode: prompts for "First row" + "Second row"
+      - Column mode: prompts for "First column" + "Second column"
+
+      Implementation detail:
+      - Current mode is stored in hidden input #tableSwapMode
+      - Labels/title are swapped dynamically by showTableSwapDialog(mode)
+    -->
+    <div id="tableSwapModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 250px;">
+        <h3 id="tableSwapTitle" style="margin-top: 0; margin-bottom: 16px; font-size: 16px;">Swap in Table</h3>
+        <input type="hidden" id="tableSwapMode" value="row">
+
+        <div style="margin-bottom: 12px;">
+          <label id="tableSwapFirstLabel" for="tableSwapFirst" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">First row (1-based):</label>
+          <input type="number" id="tableSwapFirst" value="1" min="1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label id="tableSwapSecondLabel" for="tableSwapSecond" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Second row (1-based):</label>
+          <input type="number" id="tableSwapSecond" value="2" min="1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input type="checkbox" id="tableSwapKeepFormatting">
+            Keep source text style + cell formatting (fill/alignment)
+          </label>
+          <div style="margin-top: 4px; font-size: 11px; color: #666;">
+            Note: Table border swap is not supported by Google Apps Script.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="hideTableSwapDialog()" style="background: #ddd; color: #333;">Cancel</button>
+          <button onclick="runTableSwap()" style="background: #4285f4; color: white;">Apply</button>
         </div>
       </div>
     </div>
@@ -864,6 +915,103 @@
               '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
           })
           .alignToTable(alignment, padding);
+      }
+
+      /**
+       * showTableSwapDialog(mode)
+       *
+       * Shows the shared swap modal for row or column operations.
+       *
+       * What this function configures:
+       * 1. Stores active mode ('row' or 'column') in a hidden input
+       * 2. Updates modal title text to match selected operation
+       * 3. Updates both field labels to match row/column language
+       * 4. Displays modal
+       *
+       * @param {string} mode - 'row' or 'column'
+       */
+      function showTableSwapDialog(mode) {
+        // Strictly treat only 'row' as row mode; any other value maps to column mode.
+        const isRowMode = mode === 'row';
+
+        // Persist mode so runTableSwap() knows which server function to call.
+        document.getElementById('tableSwapMode').value = isRowMode ? 'row' : 'column';
+
+        // Update title and labels dynamically to keep one reusable modal.
+        document.getElementById('tableSwapTitle').innerText = isRowMode ? 'Swap Rows in Table' : 'Swap Columns in Table';
+        document.getElementById('tableSwapFirstLabel').innerText = isRowMode ? 'First row (1-based):' : 'First column (1-based):';
+        document.getElementById('tableSwapSecondLabel').innerText = isRowMode ? 'Second row (1-based):' : 'Second column (1-based):';
+
+        // Show modal overlay.
+        document.getElementById('tableSwapModal').style.display = 'block';
+      }
+
+      /**
+       * hideTableSwapDialog()
+       *
+       * Hides the row/column swap modal overlay.
+       */
+      function hideTableSwapDialog() {
+        document.getElementById('tableSwapModal').style.display = 'none';
+      }
+
+      /**
+       * runTableSwap()
+       *
+       * Executes the selected table swap action.
+       *
+       * Flow:
+       * 1. Read mode and index inputs from modal
+       * 2. Validate that both indices are positive integers
+       * 3. Close modal and show progress status
+       * 4. Build a single google.script.run runner with success/error handlers
+       * 5. Dispatch to swapTableRows(...) or swapTableColumns(...)
+       */
+      function runTableSwap() {
+        // Read operation mode configured by showTableSwapDialog().
+        const mode = document.getElementById('tableSwapMode').value;
+
+        // Parse input values as base-10 integers (UI is 1-based).
+        const first = parseInt(document.getElementById('tableSwapFirst').value, 10);
+        const second = parseInt(document.getElementById('tableSwapSecond').value, 10);
+        const keepFormatting = document.getElementById('tableSwapKeepFormatting').checked;
+
+        // Client-side validation for fast feedback before server call.
+        if (!Number.isInteger(first) || !Number.isInteger(second) || first < 1 || second < 1) {
+          document.getElementById('status').innerText = '❌ Error: Enter valid positive whole numbers.';
+          return;
+        }
+
+        // Hide modal once input is accepted.
+        hideTableSwapDialog();
+
+        // Show operation-specific progress status.
+        if (mode === 'row') {
+          document.getElementById('status').innerText = keepFormatting ?
+            'Swapping rows in table (with source formatting)…' :
+            'Swapping rows in table…';
+        } else {
+          document.getElementById('status').innerText = keepFormatting ?
+            'Swapping columns in table (with source formatting)…' :
+            'Swapping columns in table…';
+        }
+
+        // Create shared runner so both paths have identical result/error handling.
+        const runner = google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Swapped.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          });
+
+        // Dispatch to server function based on selected mode.
+        if (mode === 'row') {
+          runner.swapTableRows(first, second, keepFormatting);
+        } else {
+          runner.swapTableColumns(first, second, keepFormatting);
+        }
       }
 
       /**

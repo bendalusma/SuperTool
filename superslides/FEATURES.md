@@ -25,6 +25,8 @@ SuperSlides is a Google Slides add-on that provides precise layout tools for ali
    - [Dock Bottom](#dock-bottom)
 5. [Table-Based Alignment](#table-based-alignment)
    - [Align in Table](#align-in-table)
+   - [Swap Rows in Table](#swap-rows-in-table)
+   - [Swap Columns in Table](#swap-columns-in-table)
 6. [Matrix Alignment](#matrix-alignment)
 7. [Slide Layout](#slide-layout)
    - [Insert 2 Columns](#insert-2-columns)
@@ -663,6 +665,78 @@ Aligns selected shapes within their containing table cells with a choice of left
   - **Right:** `cellLeft + cellWidth - shapeWidth - padding`
   - **Center:** `cellLeft + (cellWidth / 2) - (shapeWidth / 2)`
 - Table dimensions calculated by summing individual column widths and row heights (handles non-uniform cells)
+
+---
+
+### Swap Rows in Table
+
+**What it does:**  
+Swaps two rows in a selected table by row index (1-based). You can swap content only, or swap content **with source text/cell formatting**.
+
+**How to use:**
+
+1. Select a table on the current slide (or ensure only one table exists on the slide)
+2. Click **Swap Rows in Table** in the sidebar
+3. Enter:
+   - **First row** (1-based)
+   - **Second row** (1-based)
+4. *(Optional)* Enable **Keep source text style + cell formatting (fill/alignment)**
+5. Click **Apply**
+
+**Modes:**
+
+- **Default mode (checkbox OFF):**
+  - Swaps plain text values between row cells
+  - Destination row keeps its existing formatting context
+
+- **Keep formatting mode (checkbox ON):**
+  - Swaps text content and formatting payload together
+  - Preserves and transfers:
+    - text run styles (font family, size, weight, bold/italic/underline, color, links, etc.)
+    - paragraph styles (line spacing, spacing above/below, indents, paragraph alignment)
+    - cell fill
+    - cell content alignment
+
+**Technical details:**
+
+- Uses 1-based user input and converts to 0-based table indexes
+- Validates bounds against actual table row count
+- If both indexes are the same: operation returns early with no change
+- Merged-cell swap is blocked with a clear error message
+
+---
+
+### Swap Columns in Table
+
+**What it does:**  
+Swaps two columns in a selected table by column index (1-based). Supports the same two modes as row swapping.
+
+**How to use:**
+
+1. Select a table on the current slide (or ensure only one table exists on the slide)
+2. Click **Swap Columns in Table** in the sidebar
+3. Enter:
+   - **First column** (1-based)
+   - **Second column** (1-based)
+4. *(Optional)* Enable **Keep source text style + cell formatting (fill/alignment)**
+5. Click **Apply**
+
+**Modes:**
+
+- **Default mode (checkbox OFF):**
+  - Swaps plain text values between column cells
+  - Destination column keeps its existing formatting context
+
+- **Keep formatting mode (checkbox ON):**
+  - Swaps text + style payload with cell
+  - Preserves/transfers the same formatting set as row swap mode
+
+**Technical details:**
+
+- Uses 1-based user input and converts to 0-based table indexes
+- Validates bounds against actual table column count
+- If both indexes are the same: operation returns early with no change
+- Merged-cell swap is blocked with a clear error message
 
 ---
 
@@ -1640,6 +1714,8 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `dockTop()` | — | `string` | Moves shapes until bottom edges touch anchor's top edge |
 | `dockBottom()` | — | `string` | Moves shapes until top edges touch anchor's bottom edge |
 | `alignToTable(alignment, padding)` | `string`, `number` | `string` | Aligns shapes within table cells |
+| `swapTableRows(rowA, rowB, keepFormatting)` | `number`, `number`, `boolean` | `string` | Swaps two table rows (optionally preserving source formatting) |
+| `swapTableColumns(colA, colB, keepFormatting)` | `number`, `number`, `boolean` | `string` | Swaps two table columns (optionally preserving source formatting) |
 | `arrangeMatrix(rows, cols, spacing)` | `number`, `number`, `number` | `string` | Arranges shapes in grid layout |
 | `insertTwoColumns()` | — | `string` | Inserts 2-column layout with title and content boxes |
 | `insertThreeColumns()` | — | `string` | Inserts 3-column layout with title and content boxes |
@@ -1682,6 +1758,9 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `showTableAlignDialog()` | Shows modal dialog for table alignment options |
 | `hideTableAlignDialog()` | Hides the table alignment modal dialog |
 | `runTableAlign()` | Gets selected alignment and padding, calls `alignToTable()` |
+| `showTableSwapDialog(mode)` | Shows row/column swap dialog and configures labels |
+| `hideTableSwapDialog()` | Hides the row/column swap dialog |
+| `runTableSwap()` | Reads indexes + formatting checkbox, calls `swapTableRows()` or `swapTableColumns()` |
 | `runArrangeMatrix()` | Gets rows/cols/spacing, calls `arrangeMatrix()`, shows result |
 | `runInsertTwoColumns()` | Shows "Inserting...", calls `insertTwoColumns()`, shows result |
 | `runInsertThreeColumns()` | Shows "Inserting...", calls `insertThreeColumns()`, shows result |
@@ -1732,6 +1811,15 @@ Certain element types (like embedded videos or linked objects) may not support `
 - **Multiple tables**: If multiple tables exist on a slide, all are checked, but shapes align only within their containing table.
 - **Select shapes, not tables**: The table itself should not be selected. Tables are automatically filtered from the selection to prevent accidental movement.
 - **Vertical centering**: Shapes are always centered vertically within their cells. Top/bottom alignment within cells is not currently supported.
+
+### Table Swap Limitations
+
+- **Border swap not supported**: Google Apps Script table APIs used here do not provide practical border transfer support in this flow.
+- **Merged cells not supported for swap**: If either target cell is merged, the operation is blocked with a clear error.
+- **Single-table resolution rules**:
+  - If exactly one table is selected, that table is used.
+  - If no table is selected but exactly one table exists on current slide, that table is used.
+  - Otherwise, user must select a single target table.
 
 ### Matrix Alignment Limitations
 
