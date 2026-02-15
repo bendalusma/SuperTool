@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!--
+      ========================================================================
+      SuperSlides - BulkRecolorDialog.html
+      ========================================================================
+
+      This file powers the standalone Bulk Recolor modal dialog shown on top of
+      Google Slides (outside sidebar width constraints).
+
+      Architecture:
+      - This HTML runs client-side in Apps Script dialog context
+      - It reads color inventory via getBulkRecolorDialogData() from Code.gs
+      - It submits replacements via bulkRecolorPresentation(request)
+
+      Key design decision:
+      - Each category (Font, Fill, Outline) has independent replacement picks
+      - Changing red->blue on the Font tab does NOT affect red fills
+      - The "All" tab applies replacement picks to ALL categories where a color appears
+      ========================================================================
+    -->
+    <base target="_top">
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 18px;
+        color: #222;
+        background: #fff;
+      }
+
+      h3 {
+        margin: 0 0 14px;
+        font-size: 22px;
+        line-height: 1.2;
+      }
+
+      .field {
+        margin-bottom: 12px;
+      }
+
+      label {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 16px;
+        line-height: 1.3;
+        padding: 8px 10px;
+        border: 1px solid #9aa0a6;
+        border-radius: 4px;
+        background: #fff;
+      }
+
+      /* Category tab bar */
+      .category-tabs {
+        display: flex;
+        gap: 0;
+        margin-bottom: 0;
+        border-bottom: 2px solid #dadce0;
+      }
+
+      .category-tab {
+        padding: 8px 16px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        background: none;
+        color: #5f6368;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        min-width: auto;
+        width: auto;
+        border-radius: 0;
+      }
+
+      .category-tab.active {
+        color: #1a73e8;
+        border-bottom-color: #1a73e8;
+      }
+
+      .category-tab:hover:not(.active) {
+        color: #333;
+        background: #f8f9fa;
+      }
+
+      /* Color list container */
+      .color-list-container {
+        max-height: 340px;
+        overflow-y: auto;
+        border: 1px solid #dadce0;
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        margin-bottom: 8px;
+      }
+
+      .color-list-header {
+        display: flex;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #5f6368;
+        background: #f8f9fa;
+        border-bottom: 1px solid #dadce0;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
+      .color-list-header .col-current {
+        flex: 1;
+      }
+
+      .color-list-header .col-replace {
+        width: 120px;
+        text-align: right;
+      }
+
+      .color-row {
+        display: flex;
+        align-items: center;
+        padding: 5px 12px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+
+      .color-row:last-child {
+        border-bottom: none;
+      }
+
+      .color-row.has-pick {
+        background: #e8f0fe;
+      }
+
+      .color-swatch {
+        width: 24px;
+        height: 24px;
+        border-radius: 3px;
+        border: 1px solid #ccc;
+        margin-right: 8px;
+        flex-shrink: 0;
+      }
+
+      .color-hex {
+        font-size: 13px;
+        font-family: monospace;
+        color: #333;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .color-category-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: #e8eaed;
+        color: #5f6368;
+        margin-left: 4px;
+        flex-shrink: 0;
+      }
+
+      .color-picker-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        width: 120px;
+        justify-content: flex-end;
+      }
+
+      .color-picker-wrapper input[type="color"] {
+        width: 32px;
+        height: 28px;
+        padding: 0;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        cursor: pointer;
+        background: transparent;
+      }
+
+      .new-swatch {
+        width: 20px;
+        height: 20px;
+        border-radius: 3px;
+        border: 1px solid #ccc;
+        flex-shrink: 0;
+      }
+
+      .btn-clear-pick {
+        font-size: 11px;
+        padding: 2px 5px;
+        background: #f1f3f4;
+        border: 1px solid #dadce0;
+        border-radius: 3px;
+        cursor: pointer;
+        color: #666;
+        min-width: auto;
+        width: auto;
+        line-height: 1;
+      }
+
+      .btn-clear-pick:hover {
+        background: #e0e0e0;
+      }
+
+      .empty-message {
+        padding: 24px;
+        text-align: center;
+        color: #999;
+        font-size: 13px;
+      }
+
+      #dialogStatus {
+        min-height: 20px;
+        font-size: 13px;
+        color: #4a4a4a;
+        margin: 6px 0 12px;
+        font-weight: 400;
+      }
+
+      .buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      button.btn-primary {
+        min-width: 110px;
+        padding: 9px 14px;
+        font-size: 15px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        background: #1a73e8;
+        color: #fff;
+      }
+
+      button.btn-done {
+        min-width: 110px;
+        padding: 9px 14px;
+        font-size: 15px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        background: #188038;
+        color: #fff;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h3>Bulk Recolor</h3>
+
+    <div class="field">
+      <label for="scope">Replace in:</label>
+      <select id="scope">
+        <option value="ENTIRE_PRESENTATION" selected>Entire Presentation</option>
+        <option value="SELECTED_SLIDES">Selected Slides</option>
+      </select>
+    </div>
+
+    <div class="category-tabs">
+      <button class="category-tab active" data-category="all" onclick="setCategory('all')">All</button>
+      <button class="category-tab" data-category="font" onclick="setCategory('font')">Font</button>
+      <button class="category-tab" data-category="fill" onclick="setCategory('fill')">Fill</button>
+      <button class="category-tab" data-category="outline" onclick="setCategory('outline')">Outline</button>
+    </div>
+
+    <div class="color-list-container" id="colorListContainer">
+      <div class="color-list-header">
+        <span class="col-current">Current Color</span>
+        <span class="col-replace">Replace with</span>
+      </div>
+      <div id="colorListBody">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+
+    <div id="dialogStatus">Scanning colors...</div>
+
+    <div class="buttons">
+      <button id="doneBtn" class="btn-done" type="button" onclick="google.script.host.close()">Done</button>
+      <button id="applyBtn" class="btn-primary" type="button" onclick="runBulkRecolor()" disabled>Replace</button>
+    </div>
+
+    <script>
+      // ====================================================================
+      // State
+      // ====================================================================
+
+      /** Color inventory from server. */
+      var colorData = null; // { fontColors: [], fillColors: [], outlineColors: [] }
+
+      /** Currently active category tab. */
+      var activeCategory = 'all'; // 'all' | 'font' | 'fill' | 'outline'
+
+      /**
+       * User-selected replacement colors, keyed by "category:hex".
+       * Example: { "font:#FF0000": "#0000FF", "fill:#FF0000": "#00FF00" }
+       *
+       * On the "All" tab, a pick creates entries for EVERY category where
+       * the color appears.  On individual tabs, only that category is set.
+       */
+      var userPicks = {};
+
+      // ====================================================================
+      // Status helper
+      // ====================================================================
+
+      function setStatus(text, makeBold) {
+        var statusNode = document.getElementById('dialogStatus');
+        statusNode.innerText = text;
+        statusNode.style.fontWeight = makeBold ? '700' : '400';
+      }
+
+      // ====================================================================
+      // Category tabs
+      // ====================================================================
+
+      function setCategory(cat) {
+        activeCategory = cat;
+        var tabs = document.querySelectorAll('.category-tab');
+        for (var i = 0; i < tabs.length; i++) {
+          if (tabs[i].getAttribute('data-category') === cat) {
+            tabs[i].classList.add('active');
+          } else {
+            tabs[i].classList.remove('active');
+          }
+        }
+        renderColorList();
+      }
+
+      // ====================================================================
+      // Data loading
+      // ====================================================================
+
+      function loadDialogData() {
+        setStatus('Scanning colors...', false);
+        document.getElementById('applyBtn').disabled = true;
+
+        google.script.run
+          .withSuccessHandler(function (data) {
+            colorData = data;
+
+            var totalColors = 0;
+            if (data) {
+              totalColors = (data.fontColors ? data.fontColors.length : 0)
+                          + (data.fillColors ? data.fillColors.length : 0)
+                          + (data.outlineColors ? data.outlineColors.length : 0);
+            }
+
+            if (totalColors === 0) {
+              setStatus('No colors detected in the presentation.', true);
+            } else {
+              setStatus(totalColors + ' color occurrence(s) found. Set replacement colors, then click Replace.', false);
+              document.getElementById('applyBtn').disabled = false;
+            }
+
+            renderColorList();
+          })
+          .withFailureHandler(function (err) {
+            setStatus('Error scanning colors: ' + (err && err.message ? err.message : JSON.stringify(err)), true);
+          })
+          .getBulkRecolorDialogData();
+      }
+
+      // ====================================================================
+      // Color list building
+      // ====================================================================
+
+      /**
+       * Returns an array of { hex, categories } entries filtered by the
+       * active category tab.  In "All" view, colors are deduplicated across
+       * categories with badge labels.
+       */
+      function buildColorEntries() {
+        if (!colorData) return [];
+
+        if (activeCategory === 'all') {
+          var hexMap = {};
+          addToHexMap(hexMap, colorData.fontColors || [], 'font');
+          addToHexMap(hexMap, colorData.fillColors || [], 'fill');
+          addToHexMap(hexMap, colorData.outlineColors || [], 'outline');
+          var keys = Object.keys(hexMap).sort();
+          var entries = [];
+          for (var i = 0; i < keys.length; i++) {
+            entries.push(hexMap[keys[i]]);
+          }
+          return entries;
+        }
+
+        // Single category
+        var colors = [];
+        if (activeCategory === 'font') colors = colorData.fontColors || [];
+        else if (activeCategory === 'fill') colors = colorData.fillColors || [];
+        else if (activeCategory === 'outline') colors = colorData.outlineColors || [];
+
+        var entries = [];
+        for (var j = 0; j < colors.length; j++) {
+          entries.push({ hex: colors[j], categories: [activeCategory] });
+        }
+        return entries;
+      }
+
+      function addToHexMap(hexMap, colorArray, category) {
+        for (var i = 0; i < colorArray.length; i++) {
+          var hex = colorArray[i];
+          if (!hexMap[hex]) {
+            hexMap[hex] = { hex: hex, categories: [] };
+          }
+          hexMap[hex].categories.push(category);
+        }
+      }
+
+      /**
+       * Returns the current pick value for a given hex in the active
+       * category context.  For "all", checks any category key.
+       */
+      function getPickForDisplay(hex, categories) {
+        if (activeCategory !== 'all') {
+          return userPicks[activeCategory + ':' + hex] || null;
+        }
+        // "All" view: show pick if any category has one for this hex
+        for (var i = 0; i < categories.length; i++) {
+          var val = userPicks[categories[i] + ':' + hex];
+          if (val) return val;
+        }
+        return null;
+      }
+
+      // ====================================================================
+      // Rendering
+      // ====================================================================
+
+      function renderColorList() {
+        var container = document.getElementById('colorListBody');
+        var entries = buildColorEntries();
+
+        if (entries.length === 0) {
+          container.innerHTML = '<div class="empty-message">No colors found for this category.</div>';
+          return;
+        }
+
+        var html = '';
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i];
+          var pick = getPickForDisplay(entry.hex, entry.categories);
+          var hasPick = (pick !== null);
+          var pickerValue = hasPick ? pick : entry.hex;
+
+          html += '<div class="color-row' + (hasPick ? ' has-pick' : '') + '">';
+
+          // Current color swatch + hex
+          html += '<div class="color-swatch" style="background-color: ' + entry.hex + ';"></div>';
+          html += '<span class="color-hex">' + entry.hex + '</span>';
+
+          // Category badges in "All" view
+          if (activeCategory === 'all') {
+            for (var c = 0; c < entry.categories.length; c++) {
+              html += '<span class="color-category-badge">' + entry.categories[c] + '</span>';
+            }
+          }
+
+          // Replacement picker
+          html += '<div class="color-picker-wrapper">';
+          if (hasPick) {
+            html += '<div class="new-swatch" style="background-color: ' + pick + ';" title="' + pick + '"></div>';
+          }
+          html += '<input type="color"'
+                + ' value="' + pickerValue + '"'
+                + ' data-hex="' + entry.hex + '"'
+                + ' data-categories="' + entry.categories.join(',') + '"'
+                + ' onchange="onColorPick(this)">';
+          if (hasPick) {
+            html += '<button class="btn-clear-pick"'
+                  + ' onclick="clearPick(\'' + entry.hex + '\', \'' + entry.categories.join(',') + '\')"'
+                  + ' title="Reset">x</button>';
+          }
+          html += '</div>';
+
+          html += '</div>';
+        }
+
+        container.innerHTML = html;
+      }
+
+      // ====================================================================
+      // Pick handling
+      // ====================================================================
+
+      function onColorPick(inputEl) {
+        var originalHex = inputEl.getAttribute('data-hex');
+        var categories = inputEl.getAttribute('data-categories').split(',');
+        var newHex = inputEl.value.toUpperCase();
+
+        if (activeCategory === 'all') {
+          // "All" tab: set pick for every category where this color appears
+          for (var i = 0; i < categories.length; i++) {
+            var key = categories[i] + ':' + originalHex;
+            if (newHex === originalHex) {
+              delete userPicks[key];
+            } else {
+              userPicks[key] = newHex;
+            }
+          }
+        } else {
+          // Individual tab: set pick only for this category
+          var key = activeCategory + ':' + originalHex;
+          if (newHex === originalHex) {
+            delete userPicks[key];
+          } else {
+            userPicks[key] = newHex;
+          }
+        }
+
+        renderColorList();
+      }
+
+      function clearPick(hex, categoriesStr) {
+        var categories = categoriesStr.split(',');
+
+        if (activeCategory === 'all') {
+          // Clear for all categories
+          for (var i = 0; i < categories.length; i++) {
+            delete userPicks[categories[i] + ':' + hex];
+          }
+        } else {
+          delete userPicks[activeCategory + ':' + hex];
+        }
+
+        renderColorList();
+      }
+
+      // ====================================================================
+      // Replace action
+      // ====================================================================
+
+      function runBulkRecolor() {
+        var pickedKeys = Object.keys(userPicks);
+        if (pickedKeys.length === 0) {
+          setStatus('No replacement colors selected. Use the color pickers to choose new colors.', true);
+          return;
+        }
+
+        // Build per-category replacement maps from userPicks
+        var fontReplacements = {};
+        var fillReplacements = {};
+        var outlineReplacements = {};
+
+        for (var i = 0; i < pickedKeys.length; i++) {
+          var parts = pickedKeys[i].split(':');
+          var category = parts[0];
+          var oldHex = parts[1];
+          var newHex = userPicks[pickedKeys[i]];
+
+          if (category === 'font') {
+            fontReplacements[oldHex] = newHex;
+          } else if (category === 'fill') {
+            fillReplacements[oldHex] = newHex;
+          } else if (category === 'outline') {
+            outlineReplacements[oldHex] = newHex;
+          }
+        }
+
+        var payload = {
+          scope: document.getElementById('scope').value,
+          replacements: {
+            font: fontReplacements,
+            fill: fillReplacements,
+            outline: outlineReplacements
+          }
+        };
+
+        var applyBtn = document.getElementById('applyBtn');
+        var doneBtn = document.getElementById('doneBtn');
+        applyBtn.disabled = true;
+        setStatus('Replacing colors...', false);
+
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            setStatus(msg || 'Color replacement completed.', true);
+            applyBtn.disabled = false;
+            doneBtn.focus();
+          })
+          .withFailureHandler(function (err) {
+            setStatus('Error: ' + (err && err.message ? err.message : JSON.stringify(err)), true);
+            applyBtn.disabled = false;
+          })
+          .bulkRecolorPresentation(payload);
+      }
+
+      // ====================================================================
+      // Initialize on load
+      // ====================================================================
+
+      loadDialogData();
+    </script>
+  </body>
+</html>

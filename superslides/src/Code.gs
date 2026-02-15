@@ -2369,6 +2369,600 @@ function swapTableColumns(colA, colB, keepFormatting) {
   return `Swapped column ${first.index} with column ${second.index}.`;
 }
 
+/**
+ * getTableDimensions_(table)
+ *
+ * Calculates a table's rendered width and height by summing column widths
+ * and row minimum heights.
+ *
+ * @param {Table} table - Source table
+ * @returns {Object} { width: number, height: number }
+ */
+function getTableDimensions_(table) {
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+
+  let width = 0;
+  for (let col = 0; col < numCols; col++) {
+    width += table.getColumn(col).getWidth();
+  }
+
+  let height = 0;
+  for (let row = 0; row < numRows; row++) {
+    height += table.getRow(row).getMinimumHeight();
+  }
+
+  return {width: width, height: height};
+}
+
+/**
+ * tableWouldOverflowRight_(slideWidth, sourceLeft, sourceWidth, newWidth, offset)
+ *
+ * Checks whether placing a new table to the right of source would exceed slide width.
+ *
+ * @param {number} slideWidth - Presentation slide width in points
+ * @param {number} sourceLeft - Source table left position
+ * @param {number} sourceWidth - Source table width
+ * @param {number} newWidth - New table estimated width
+ * @param {number} offset - Gap between source and new table
+ * @returns {boolean} True if right placement overflows
+ */
+function tableWouldOverflowRight_(slideWidth, sourceLeft, sourceWidth, newWidth, offset) {
+  const proposedLeft = sourceLeft + sourceWidth + offset;
+  const rightEdge = proposedLeft + newWidth;
+  return rightEdge > slideWidth;
+}
+
+/**
+ * isMergedInRange_(table, startRow, endRow, startCol, endCol)
+ *
+ * Checks whether any cell in a rectangular range is merged.
+ *
+ * @param {Table} table - Source table
+ * @param {number} startRow - 0-based inclusive start row
+ * @param {number} endRow - 0-based inclusive end row
+ * @param {number} startCol - 0-based inclusive start column
+ * @param {number} endCol - 0-based inclusive end column
+ * @returns {boolean} True if merged cell exists in range
+ */
+function isMergedInRange_(table, startRow, endRow, startCol, endCol) {
+  for (let row = startRow; row <= endRow; row++) {
+    for (let col = startCol; col <= endCol; col++) {
+      const cell = table.getCell(row, col);
+      if (isMergedCell_(cell)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * copyCellFromTo_(sourceCell, targetCell, keepFormatting)
+ *
+ * Copies cell content from source to target.
+ *
+ * Modes:
+ * - keepFormatting=false: copy plain text only
+ * - keepFormatting=true: copy text + text styles + paragraph styles + fill + alignment
+ *
+ * @param {TableCell} sourceCell - Source cell
+ * @param {TableCell} targetCell - Target cell
+ * @param {boolean} keepFormatting - Whether formatting should travel with content
+ */
+function copyCellFromTo_(sourceCell, targetCell, keepFormatting) {
+  if (!keepFormatting) {
+    targetCell.getText().setText(sourceCell.getText().asString());
+    return;
+  }
+
+  const payload = captureCellPayload_(sourceCell);
+  applyCellPayload_(targetCell, payload);
+}
+
+/**
+ * buildTransposeMatrix_(table, transposeHeader)
+ *
+ * Builds source->destination mapping for transpose operation.
+ *
+ * Mapping output entries:
+ * - sourceRow/sourceCol: source location
+ * - destRow/destCol: destination location
+ *
+ * @param {Table} table - Source table
+ * @param {boolean} transposeHeader - Whether header row should be transposed
+ * @returns {Object} { rows:number, cols:number, mappings:Object[] }
+ */
+function buildTransposeMatrix_(table, transposeHeader) {
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+  const mappings = [];
+
+  if (transposeHeader) {
+    // Full transpose: R x C -> C x R
+    for (let sourceRow = 0; sourceRow < numRows; sourceRow++) {
+      for (let sourceCol = 0; sourceCol < numCols; sourceCol++) {
+        mappings.push({
+          sourceRow: sourceRow,
+          sourceCol: sourceCol,
+          destRow: sourceCol,
+          destCol: sourceRow
+        });
+      }
+    }
+
+    return {
+      rows: numCols,
+      cols: numRows,
+      mappings: mappings
+    };
+  }
+
+  // Header-preserving transpose:
+  // - Row 0 remains row 0 as-is
+  // - Body rows (1..R-1) are transposed beneath header
+  const bodyRows = Math.max(0, numRows - 1);
+  const outputRows = 1 + numCols;
+  const outputCols = Math.max(numCols, bodyRows);
+
+  // Copy header row to top row unchanged.
+  for (let headerCol = 0; headerCol < numCols; headerCol++) {
+    mappings.push({
+      sourceRow: 0,
+      sourceCol: headerCol,
+      destRow: 0,
+      destCol: headerCol
+    });
+  }
+
+  // Transpose body into rows 1..numCols.
+  for (let sourceRow = 1; sourceRow < numRows; sourceRow++) {
+    for (let sourceCol = 0; sourceCol < numCols; sourceCol++) {
+      mappings.push({
+        sourceRow: sourceRow,
+        sourceCol: sourceCol,
+        destRow: sourceCol + 1,
+        destCol: sourceRow - 1
+      });
+    }
+  }
+
+  return {
+    rows: outputRows,
+    cols: outputCols,
+    mappings: mappings
+  };
+}
+
+/**
+ * insertTransposedTable_(slide, sourceTable, rows, cols)
+ *
+ * Inserts a new table near source table with right-side preference and
+ * below-source fallback when right placement overflows slide bounds.
+ *
+ * @param {Slide} slide - Target slide
+ * @param {Table} sourceTable - Source table for placement reference
+ * @param {number} rows - Destination table row count
+ * @param {number} cols - Destination table column count
+ * @returns {Table} Newly inserted table
+ */
+function insertTransposedTable_(slide, sourceTable, rows, cols) {
+  const presentation = SlidesApp.getActivePresentation();
+  const slideWidth = presentation.getPageWidth();
+
+  const sourceLeft = sourceTable.getLeft();
+  const sourceTop = sourceTable.getTop();
+  const sourceSize = getTableDimensions_(sourceTable);
+
+  // Estimate destination size using transposed source footprint.
+  // This gives a reasonable placement estimate before table creation.
+  const estimatedWidth = sourceSize.height;
+  const horizontalGap = 18; // 0.25 inch
+  const verticalGap = 14;   // 0.19 inch
+
+  let targetLeft = sourceLeft + sourceSize.width + horizontalGap;
+  let targetTop = sourceTop;
+
+  if (tableWouldOverflowRight_(slideWidth, sourceLeft, sourceSize.width, estimatedWidth, horizontalGap)) {
+    targetLeft = sourceLeft;
+    targetTop = sourceTop + sourceSize.height + verticalGap;
+  }
+
+  // Apps Script Slide.insertTable() supports row/column creation overloads, but
+  // not the 4-argument positional overload used by shape insertion APIs.
+  // Create first, then position explicitly.
+  const newTable = slide.insertTable(rows, cols);
+  try {
+    newTable.setLeft(targetLeft);
+    newTable.setTop(targetTop);
+  } catch (e) {
+    // If positioning fails for any reason, return table at default insertion spot.
+  }
+  return newTable;
+}
+
+/**
+ * insertTableAtPosition_(slide, rows, cols, left, top)
+ *
+ * Inserts a table and positions it at explicit coordinates.
+ *
+ * @param {Slide} slide - Target slide
+ * @param {number} rows - Row count
+ * @param {number} cols - Column count
+ * @param {number} left - Left position in points
+ * @param {number} top - Top position in points
+ * @returns {Table} Inserted table
+ */
+function insertTableAtPosition_(slide, rows, cols, left, top) {
+  const table = slide.insertTable(rows, cols);
+  try {
+    table.setLeft(left);
+    table.setTop(top);
+  } catch (e) {
+    // Keep default insertion position if placement APIs fail unexpectedly.
+  }
+  return table;
+}
+
+/**
+ * getTableIndexOnSlide_(slide, table)
+ *
+ * Finds selected table's index in slide.getTables() order.
+ * Used to resolve corresponding copied table on duplicated slide.
+ *
+ * @param {Slide} slide - Source slide
+ * @param {Table} table - Table to locate
+ * @returns {number} 0-based index, or -1 if not found
+ */
+function getTableIndexOnSlide_(slide, table) {
+  const tables = slide.getTables();
+  const targetId = table.getObjectId();
+  for (let i = 0; i < tables.length; i++) {
+    if (tables[i].getObjectId() === targetId) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * duplicateSlideAfter_(presentation, sourceSlide)
+ *
+ * Duplicates source slide and attempts to place the duplicate immediately
+ * after the source slide. Falls back to append behavior if needed.
+ *
+ * @param {Presentation} presentation - Active presentation
+ * @param {Slide} sourceSlide - Slide to duplicate
+ * @returns {Slide} Duplicated slide
+ */
+function duplicateSlideAfter_(presentation, sourceSlide) {
+  const slides = presentation.getSlides();
+  const sourceId = sourceSlide.getObjectId();
+  let sourceIndex = -1;
+
+  for (let i = 0; i < slides.length; i++) {
+    if (slides[i].getObjectId() === sourceId) {
+      sourceIndex = i;
+      break;
+    }
+  }
+
+  if (sourceIndex >= 0) {
+    try {
+      return presentation.insertSlide(sourceIndex + 1, sourceSlide);
+    } catch (e) {
+      // Fallback below.
+    }
+  }
+
+  return presentation.appendSlide(sourceSlide);
+}
+
+/**
+ * captureRowPayload_(table, rowIndex)
+ *
+ * Captures all cells in a row so row order can be rewritten after sorting.
+ *
+ * @param {Table} table - Source table
+ * @param {number} rowIndex - 0-based row index
+ * @returns {Object[]} Array of cell payload objects, one per column
+ */
+function captureRowPayload_(table, rowIndex) {
+  const numCols = table.getNumColumns();
+  const payload = [];
+
+  for (let col = 0; col < numCols; col++) {
+    const cell = table.getCell(rowIndex, col);
+    payload.push(captureCellPayload_(cell));
+  }
+
+  return payload;
+}
+
+/**
+ * applyRowPayload_(table, rowIndex, rowPayload, keepFormatting)
+ *
+ * Applies a previously captured row payload into target row.
+ *
+ * @param {Table} table - Target table
+ * @param {number} rowIndex - 0-based row index
+ * @param {Object[]} rowPayload - Array of cell payload objects
+ * @param {boolean} keepFormatting - Whether formatting should travel with values
+ */
+function applyRowPayload_(table, rowIndex, rowPayload, keepFormatting) {
+  for (let col = 0; col < rowPayload.length; col++) {
+    const targetCell = table.getCell(rowIndex, col);
+    const cellPayload = rowPayload[col];
+
+    if (!keepFormatting) {
+      targetCell.getText().setText(cellPayload.plainText || '');
+    } else {
+      applyCellPayload_(targetCell, cellPayload);
+    }
+  }
+}
+
+/**
+ * parseSortableKey_(rawText)
+ *
+ * Auto-detects sortable key type:
+ * 1. number
+ * 2. date
+ * 3. text
+ *
+ * Blank values are tracked explicitly and always sorted last.
+ *
+ * @param {string} rawText - Cell text
+ * @returns {Object} { isBlank:boolean, type:string, numberValue:number|null, dateValue:number|null, textValue:string }
+ */
+function parseSortableKey_(rawText) {
+  const normalized = String(rawText || '').trim();
+  if (normalized === '') {
+    return {
+      isBlank: true,
+      type: 'blank',
+      numberValue: null,
+      dateValue: null,
+      textValue: ''
+    };
+  }
+
+  const numericCandidate = normalized.replace(/,/g, '');
+  if (/^[+-]?\d+(\.\d+)?$/.test(numericCandidate)) {
+    return {
+      isBlank: false,
+      type: 'number',
+      numberValue: Number(numericCandidate),
+      dateValue: null,
+      textValue: normalized.toLowerCase()
+    };
+  }
+
+  const parsedDate = Date.parse(normalized);
+  if (!Number.isNaN(parsedDate)) {
+    return {
+      isBlank: false,
+      type: 'date',
+      numberValue: null,
+      dateValue: parsedDate,
+      textValue: normalized.toLowerCase()
+    };
+  }
+
+  return {
+    isBlank: false,
+    type: 'text',
+    numberValue: null,
+    dateValue: null,
+    textValue: normalized.toLowerCase()
+  };
+}
+
+/**
+ * compareSortableKeys_(a, b, sortOrder)
+ *
+ * Compares two parsed keys with type-aware logic and order direction.
+ * Blank values are always ranked last.
+ *
+ * @param {Object} a - Parsed key A
+ * @param {Object} b - Parsed key B
+ * @param {string} sortOrder - 'asc' or 'desc'
+ * @returns {number} Comparator value
+ */
+function compareSortableKeys_(a, b, sortOrder) {
+  if (a.isBlank && !b.isBlank) return 1;
+  if (!a.isBlank && b.isBlank) return -1;
+  if (a.isBlank && b.isBlank) return 0;
+
+  const direction = sortOrder === 'desc' ? -1 : 1;
+
+  if (a.type === b.type) {
+    if (a.type === 'number') {
+      return (a.numberValue - b.numberValue) * direction;
+    }
+
+    if (a.type === 'date') {
+      return (a.dateValue - b.dateValue) * direction;
+    }
+
+    return a.textValue.localeCompare(b.textValue, undefined, {sensitivity: 'base'}) * direction;
+  }
+
+  // Type mismatch fallback: compare normalized text.
+  return a.textValue.localeCompare(b.textValue, undefined, {sensitivity: 'base'}) * direction;
+}
+
+/**
+ * transposeTable(transposeHeader, keepFormatting, slotInNewSlide)
+ *
+ * Creates transposed table and replaces source table in place by default.
+ * Optional mode can duplicate the slide and perform replacement there.
+ *
+ * Modes:
+ * - transposeHeader=true: full transpose of entire table
+ * - transposeHeader=false: keep original header row at top, transpose body only
+ *
+ * Formatting toggle:
+ * - keepFormatting=false: values only
+ * - keepFormatting=true: values + text/cell formatting payload
+ *
+ * @param {boolean} transposeHeader - Whether row 1 should be transposed
+ * @param {boolean} keepFormatting - Whether source formatting should travel
+ * @param {boolean} slotInNewSlide - Whether to run replacement on duplicated slide
+ * @returns {string} Status message
+ */
+function transposeTable(transposeHeader, keepFormatting, slotInNewSlide) {
+  const tableResult = getSelectedTableForSwap_();
+  if (tableResult.error) {
+    return tableResult.error;
+  }
+
+  const table = tableResult.table;
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+  const includeHeader = transposeHeader !== false;
+  const preserveFormatting = keepFormatting === true;
+  const useDuplicatedSlide = slotInNewSlide === true;
+
+  if (numRows === 0 || numCols === 0) {
+    return 'Selected table is empty.';
+  }
+
+  if (isMergedInRange_(table, 0, numRows - 1, 0, numCols - 1)) {
+    return 'Transpose with merged cells is not supported yet. Please unmerge cells first.';
+  }
+
+  const presentation = SlidesApp.getActivePresentation();
+  const selection = presentation.getSelection();
+  const currentPage = selection.getCurrentPage();
+  if (!currentPage || currentPage.getPageType() !== SlidesApp.PageType.SLIDE) {
+    return 'Please select a table on a slide first.';
+  }
+
+  const sourceSlide = currentPage.asSlide();
+  let workingSlide = sourceSlide;
+  let sourceTableForCopy = table;
+
+  if (useDuplicatedSlide) {
+    const sourceTableIndex = getTableIndexOnSlide_(sourceSlide, table);
+    if (sourceTableIndex < 0) {
+      return 'Could not resolve selected table on current slide.';
+    }
+
+    const duplicatedSlide = duplicateSlideAfter_(presentation, sourceSlide);
+    const duplicatedTables = duplicatedSlide.getTables();
+
+    if (sourceTableIndex >= duplicatedTables.length) {
+      return 'Could not resolve copied table on duplicated slide.';
+    }
+
+    workingSlide = duplicatedSlide;
+    sourceTableForCopy = duplicatedTables[sourceTableIndex];
+  }
+
+  const plan = buildTransposeMatrix_(table, includeHeader);
+  const sourceLeft = sourceTableForCopy.getLeft();
+  const sourceTop = sourceTableForCopy.getTop();
+
+  // New default behavior: place transposed table in same slot as source table.
+  const outputTable = insertTableAtPosition_(workingSlide, plan.rows, plan.cols, sourceLeft, sourceTop);
+
+  for (let i = 0; i < plan.mappings.length; i++) {
+    const mapping = plan.mappings[i];
+    const sourceCell = sourceTableForCopy.getCell(mapping.sourceRow, mapping.sourceCol);
+    const targetCell = outputTable.getCell(mapping.destRow, mapping.destCol);
+    copyCellFromTo_(sourceCell, targetCell, preserveFormatting);
+  }
+
+  try {
+    sourceTableForCopy.remove();
+  } catch (e) {
+    return 'Transposed table created, but original table could not be removed.';
+  }
+
+  const sourceShape = `${numRows}×${numCols}`;
+  const outputShape = `${plan.rows}×${plan.cols}`;
+  const locationText = useDuplicatedSlide ? 'on duplicated slide' : 'in place';
+
+  if (preserveFormatting) {
+    return `Replaced ${sourceShape} with transposed table ${outputShape} ${locationText} (with source formatting). Border transfer is not supported by Apps Script.`;
+  }
+  return `Replaced ${sourceShape} with transposed table ${outputShape} ${locationText}.`;
+}
+
+/**
+ * sortTable(sortColumn, sortOrder, keepFormatting)
+ *
+ * Sorts table rows like a spreadsheet with row 1 fixed as header.
+ * Sorting applies only to data rows (rows 2..N).
+ *
+ * Key rules:
+ * - Single-key sort by selected column
+ * - Blank keys always last
+ * - Auto-detect sort type: number -> date -> text
+ * - Stable tie-break: original row order
+ *
+ * @param {number} sortColumn - 1-based sort column index
+ * @param {string} sortOrder - 'asc' or 'desc'
+ * @param {boolean} keepFormatting - Whether values and formatting move together
+ * @returns {string} Status message
+ */
+function sortTable(sortColumn, sortOrder, keepFormatting) {
+  const tableResult = getSelectedTableForSwap_();
+  if (tableResult.error) {
+    return tableResult.error;
+  }
+
+  const table = tableResult.table;
+  const numRows = table.getNumRows();
+  const numCols = table.getNumColumns();
+  const preserveFormatting = keepFormatting === true;
+  const direction = sortOrder === 'desc' ? 'desc' : 'asc';
+
+  if (numRows < 2) {
+    return 'Sort requires at least 2 rows (header + at least one data row).';
+  }
+
+  const columnCheck = validateTableIndex_(sortColumn, 'Sort column', numCols);
+  if (columnCheck.error) {
+    return columnCheck.error;
+  }
+
+  const sortColIndex = columnCheck.index - 1;
+  if (isMergedInRange_(table, 1, numRows - 1, 0, numCols - 1)) {
+    return 'Sort with merged cells is not supported yet. Please unmerge cells first.';
+  }
+
+  const dataRows = [];
+  for (let row = 1; row < numRows; row++) {
+    const keyText = table.getCell(row, sortColIndex).getText().asString();
+    dataRows.push({
+      originalRow: row,
+      key: parseSortableKey_(keyText),
+      rowPayload: captureRowPayload_(table, row)
+    });
+  }
+
+  dataRows.sort(function (a, b) {
+    const result = compareSortableKeys_(a.key, b.key, direction);
+    if (result !== 0) {
+      return result;
+    }
+    return a.originalRow - b.originalRow;
+  });
+
+  for (let row = 1; row < numRows; row++) {
+    const sortedIndex = row - 1;
+    applyRowPayload_(table, row, dataRows[sortedIndex].rowPayload, preserveFormatting);
+  }
+
+  const directionLabel = direction === 'desc' ? 'descending' : 'ascending';
+  if (preserveFormatting) {
+    return `Sorted ${numRows - 1} data row(s) by column ${columnCheck.index} (${directionLabel}) with source formatting. Header row kept fixed. Border transfer is not supported by Apps Script.`;
+  }
+  return `Sorted ${numRows - 1} data row(s) by column ${columnCheck.index} (${directionLabel}). Header row kept fixed.`;
+}
+
 
 // ============================================================================
 // MATRIX ALIGNMENT
@@ -3758,6 +4352,1011 @@ function fillBottom() {
   return successCount > 0 
     ? `✅ Filled bottom space for ${successCount} object(s) to anchor`
     : '⚠️ No gaps found to fill (objects may already overlap anchor)';
+}
+
+// ============================================================================
+// TEXT TOOLS - REPLACE FONT
+// ============================================================================
+
+/**
+ * Curated list of common Google Slides font families for replacement targets.
+ *
+ * Why this list exists:
+ * - Apps Script does not provide a reliable dynamic API to enumerate every
+ *   font family available in the Slides UI at runtime.
+ * - We therefore provide a practical curated list and also allow custom input
+ *   from the sidebar for any additional font family names.
+ */
+const REPLACE_FONT_TARGET_OPTIONS_ = [
+  'Arial',
+  'Calibri',
+  'Cambria',
+  'Courier New',
+  'Georgia',
+  'Helvetica',
+  'Impact',
+  'Lato',
+  'Merriweather',
+  'Montserrat',
+  'Open Sans',
+  'Oswald',
+  'Poppins',
+  'Roboto',
+  'Times New Roman',
+  'Trebuchet MS',
+  'Verdana'
+];
+
+/**
+ * getReplaceFontDialogData()
+ *
+ * Builds the payload used to initialize the Replace Font modal.
+ *
+ * Returned payload:
+ * - fontsInPresentation: unique sorted list of font families currently found
+ *   in text runs across the entire presentation
+ * - targetFontOptions: curated list of common replacement targets
+ *
+ * @returns {Object} Dialog data for Sidebar.html
+ */
+function getReplaceFontDialogData() {
+  const presentation = SlidesApp.getActivePresentation();
+  const allSlides = presentation.getSlides();
+  const fontsInPresentation = collectFontsFromSlides_(allSlides);
+
+  return {
+    fontsInPresentation: fontsInPresentation,
+    targetFontOptions: REPLACE_FONT_TARGET_OPTIONS_.slice()
+  };
+}
+
+/**
+ * replaceFontInPresentation(request)
+ *
+ * Replaces matching font-family runs according to request options and
+ * optionally adjusts point size for each replaced run.
+ *
+ * Request schema:
+ * - sourceFont: string (required)
+ * - targetFont: string (required)
+ * - sizeDelta: integer points; may be negative, zero, or positive
+ * - restrictTo: 'ALL_TEXT' | 'SHAPES_ONLY' | 'TABLES_ONLY'
+ * - scope: 'ENTIRE_PRESENTATION' | 'SELECTED_SLIDES'
+ *
+ * Size behavior:
+ * - sizeDelta is applied only to runs that matched sourceFont and were
+ *   successfully replaced
+ * - resulting size is clamped to minimum 1pt to avoid invalid values
+ *
+ * @param {Object} request - Replace font options from sidebar modal
+ * @returns {string} Operation summary for sidebar status
+ */
+function replaceFontInPresentation(request) {
+  // Defensive normalization because Sidebar payload is user-editable by nature.
+  const sourceFont = request && request.sourceFont ? String(request.sourceFont).trim() : '';
+  const targetFont = request && request.targetFont ? String(request.targetFont).trim() : '';
+  const restrictTo = isValidReplaceRestrict_(request && request.restrictTo) ? request.restrictTo : 'ALL_TEXT';
+  const scope = isValidReplaceScope_(request && request.scope) ? request.scope : 'ENTIRE_PRESENTATION';
+  const parsedDelta = parseInt(request && request.sizeDelta, 10);
+  const sizeDelta = Number.isInteger(parsedDelta) ? parsedDelta : 0;
+
+  if (!sourceFont) {
+    return '❌ Replace Font failed: source font is required.';
+  }
+
+  if (!targetFont) {
+    return '❌ Replace Font failed: target font is required.';
+  }
+
+  const sourceKey = normalizeFontFamily_(sourceFont);
+  const targetKey = normalizeFontFamily_(targetFont);
+  if (sourceKey === targetKey && sizeDelta === 0) {
+    return 'No changes made: source and target fonts are the same and size delta is 0.';
+  }
+
+  // Resolve slide scope now so we can report precise errors up front.
+  const scopeResult = resolveSlidesForReplaceScope_(scope);
+  if (scopeResult.error) {
+    return scopeResult.error;
+  }
+
+  const slides = scopeResult.slides;
+  if (!slides || slides.length === 0) {
+    return 'No slides found for the selected scope.';
+  }
+
+  // Aggregate counters so the returned message explains exactly what changed.
+  const counters = {
+    slidesScanned: slides.length,
+    pageElementsScanned: 0,
+    textContainersScanned: 0,
+    runsScanned: 0,
+    runsMatched: 0,
+    runsReplaced: 0,
+    runsSizeAdjusted: 0,
+    failures: 0
+  };
+
+  const replaceRequest = {
+    sourceFont: sourceFont,
+    sourceKey: sourceKey,
+    targetFont: targetFont,
+    sizeDelta: sizeDelta,
+    restrictTo: restrictTo
+  };
+
+  // Walk each slide/page element recursively so grouped children are included.
+  for (let s = 0; s < slides.length; s++) {
+    const slide = slides[s];
+    const pageElements = safeGet_(function () { return slide.getPageElements(); }) || [];
+
+    for (let i = 0; i < pageElements.length; i++) {
+      processPageElementForFontReplace_(pageElements[i], replaceRequest, counters);
+    }
+  }
+
+  if (counters.runsReplaced === 0) {
+    return `No matching runs found for "${sourceFont}" in the selected scope.`;
+  }
+
+  // Build one concise summary with optional size-adjustment context.
+  let message = `Replaced ${counters.runsReplaced} run(s) from "${sourceFont}" to "${targetFont}" across ${counters.slidesScanned} slide(s).`;
+  if (sizeDelta !== 0) {
+    message += ` Size adjusted on ${counters.runsSizeAdjusted} replaced run(s) (${sizeDelta > 0 ? '+' : ''}${sizeDelta}pt, min 1pt).`;
+  }
+  if (counters.failures > 0) {
+    message += ` ${counters.failures} run(s) could not be updated.`;
+  }
+
+  return message;
+}
+
+/**
+ * isValidReplaceRestrict_(value)
+ *
+ * Validates the restrict-to token supplied by the sidebar.
+ *
+ * @param {*} value - Incoming restrict value
+ * @returns {boolean} True if value is one of supported tokens
+ */
+function isValidReplaceRestrict_(value) {
+  return value === 'ALL_TEXT' || value === 'SHAPES_ONLY' || value === 'TABLES_ONLY';
+}
+
+/**
+ * isValidReplaceScope_(value)
+ *
+ * Validates the scope token supplied by the sidebar.
+ *
+ * @param {*} value - Incoming scope value
+ * @returns {boolean} True if value is one of supported tokens
+ */
+function isValidReplaceScope_(value) {
+  return value === 'ENTIRE_PRESENTATION' || value === 'SELECTED_SLIDES';
+}
+
+/**
+ * normalizeFontFamily_(fontFamily)
+ *
+ * Converts a font-family string into a canonical form for matching.
+ * This intentionally performs trim + lowercase so casing differences
+ * (e.g., "Arial" vs "arial") do not prevent replacement.
+ *
+ * @param {string} fontFamily - Raw font family name from request/run style
+ * @returns {string} Normalized key used for comparisons
+ */
+function normalizeFontFamily_(fontFamily) {
+  return String(fontFamily || '').trim().toLowerCase();
+}
+
+/**
+ * resolveSlidesForReplaceScope_(scope)
+ *
+ * Resolves which slides should be processed by Replace Font.
+ *
+ * Scope behavior:
+ * - ENTIRE_PRESENTATION: all slides in active deck
+ * - SELECTED_SLIDES: selected thumbnail pages when available, else current slide
+ *
+ * @param {string} scope - Requested scope token
+ * @returns {Object} { slides: Slide[], error: string|null }
+ */
+function resolveSlidesForReplaceScope_(scope) {
+  const presentation = SlidesApp.getActivePresentation();
+  if (scope === 'ENTIRE_PRESENTATION') {
+    return {slides: presentation.getSlides(), error: null};
+  }
+
+  const selection = presentation.getSelection();
+  const pageRange = safeGet_(function () { return selection.getPageRange(); });
+  const pages = pageRange ? (safeGet_(function () { return pageRange.getPages(); }) || []) : [];
+  const selectedSlides = [];
+
+  // Convert selected pages to Slide objects and keep only true slide pages.
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    if (!page) {
+      continue;
+    }
+    const pageType = safeGet_(function () { return page.getPageType(); });
+    if (pageType !== SlidesApp.PageType.SLIDE) {
+      continue;
+    }
+    const slide = safeGet_(function () { return page.asSlide(); }) || page;
+    selectedSlides.push(slide);
+  }
+
+  if (selectedSlides.length > 0) {
+    return {slides: selectedSlides, error: null};
+  }
+
+  // Fallback to current slide to keep the UX usable when thumbnails were not
+  // explicitly multi-selected but user still chose "Selected Slides".
+  const currentPage = safeGet_(function () { return selection.getCurrentPage(); });
+  const currentType = currentPage ? safeGet_(function () { return currentPage.getPageType(); }) : null;
+  if (currentPage && currentType === SlidesApp.PageType.SLIDE) {
+    const currentSlide = safeGet_(function () { return currentPage.asSlide(); }) || currentPage;
+    return {slides: [currentSlide], error: null};
+  }
+
+  return {
+    slides: [],
+    error: '❌ Replace Font failed: no slide context found for "Selected Slides".'
+  };
+}
+
+/**
+ * collectFontsFromSlides_(slides)
+ *
+ * Traverses slide content recursively and returns unique font families found
+ * in shape/table text runs.
+ *
+ * @param {Slide[]} slides - Slides to scan for used font families
+ * @returns {string[]} Sorted unique list of detected font family names
+ */
+function collectFontsFromSlides_(slides) {
+  const fontMap = {};
+
+  for (let s = 0; s < slides.length; s++) {
+    const slide = slides[s];
+    const elements = safeGet_(function () { return slide.getPageElements(); }) || [];
+    for (let i = 0; i < elements.length; i++) {
+      collectFontsFromPageElement_(elements[i], fontMap);
+    }
+  }
+
+  const fonts = Object.keys(fontMap);
+  fonts.sort(function (a, b) {
+    return a.localeCompare(b, undefined, {sensitivity: 'base'});
+  });
+  return fonts;
+}
+
+/**
+ * collectFontsFromPageElement_(element, fontMap)
+ *
+ * Recursively traverses a page element and records every run font family found.
+ * Handles groups, shapes, and tables.
+ *
+ * @param {PageElement} element - Current page element to inspect
+ * @param {Object} fontMap - Mutable map used as a uniqueness set
+ */
+function collectFontsFromPageElement_(element, fontMap) {
+  const type = safeGet_(function () { return element.getPageElementType(); });
+
+  if (type === SlidesApp.PageElementType.GROUP) {
+    const children = safeGet_(function () { return element.asGroup().getChildren(); }) || [];
+    for (let c = 0; c < children.length; c++) {
+      collectFontsFromPageElement_(children[c], fontMap);
+    }
+    return;
+  }
+
+  if (type === SlidesApp.PageElementType.SHAPE) {
+    const textRange = safeGet_(function () { return element.asShape().getText(); });
+    collectFontsFromTextRange_(textRange, fontMap);
+    return;
+  }
+
+  if (type === SlidesApp.PageElementType.TABLE) {
+    const table = safeGet_(function () { return element.asTable(); });
+    if (!table) {
+      return;
+    }
+
+    const numRows = safeGet_(function () { return table.getNumRows(); }) || 0;
+    const numCols = safeGet_(function () { return table.getNumColumns(); }) || 0;
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        const cell = safeGet_(function () { return table.getCell(row, col); });
+        const textRange = cell ? safeGet_(function () { return cell.getText(); }) : null;
+        collectFontsFromTextRange_(textRange, fontMap);
+      }
+    }
+  }
+}
+
+/**
+ * collectFontsFromTextRange_(textRange, fontMap)
+ *
+ * Reads text runs from a range and stores each non-empty font family in map.
+ *
+ * @param {TextRange|null} textRange - Text container to inspect
+ * @param {Object} fontMap - Mutable uniqueness map
+ */
+function collectFontsFromTextRange_(textRange, fontMap) {
+  if (!textRange) {
+    return;
+  }
+
+  const runs = safeGet_(function () { return textRange.getRuns(); }) || [];
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    const style = safeGet_(function () { return run.getTextStyle(); });
+    const fontFamily = style ? safeGet_(function () { return style.getFontFamily(); }) : null;
+    const fontName = String(fontFamily || '').trim();
+    if (fontName) {
+      fontMap[fontName] = true;
+    }
+  }
+}
+
+/**
+ * processPageElementForFontReplace_(element, request, counters)
+ *
+ * Recursively applies font replacement to eligible text-bearing element types.
+ * Restrict rules are enforced here so all traversal paths share the same logic.
+ *
+ * @param {PageElement} element - Current element to process
+ * @param {Object} request - Normalized replace request
+ * @param {Object} counters - Mutable aggregate counters
+ */
+function processPageElementForFontReplace_(element, request, counters) {
+  counters.pageElementsScanned += 1;
+
+  const type = safeGet_(function () { return element.getPageElementType(); });
+  if (type === SlidesApp.PageElementType.GROUP) {
+    const children = safeGet_(function () { return element.asGroup().getChildren(); }) || [];
+    for (let c = 0; c < children.length; c++) {
+      processPageElementForFontReplace_(children[c], request, counters);
+    }
+    return;
+  }
+
+  const processShapes = request.restrictTo === 'ALL_TEXT' || request.restrictTo === 'SHAPES_ONLY';
+  const processTables = request.restrictTo === 'ALL_TEXT' || request.restrictTo === 'TABLES_ONLY';
+
+  if (processShapes && type === SlidesApp.PageElementType.SHAPE) {
+    const textRange = safeGet_(function () { return element.asShape().getText(); });
+    if (textRange) {
+      counters.textContainersScanned += 1;
+      replaceMatchingRunsInTextRange_(textRange, request, counters);
+    }
+    return;
+  }
+
+  if (processTables && type === SlidesApp.PageElementType.TABLE) {
+    const table = safeGet_(function () { return element.asTable(); });
+    if (!table) {
+      return;
+    }
+
+    const numRows = safeGet_(function () { return table.getNumRows(); }) || 0;
+    const numCols = safeGet_(function () { return table.getNumColumns(); }) || 0;
+    for (let row = 0; row < numRows; row++) {
+      for (let col = 0; col < numCols; col++) {
+        const cell = safeGet_(function () { return table.getCell(row, col); });
+        const textRange = cell ? safeGet_(function () { return cell.getText(); }) : null;
+        if (!textRange) {
+          continue;
+        }
+
+        counters.textContainersScanned += 1;
+        replaceMatchingRunsInTextRange_(textRange, request, counters);
+      }
+    }
+  }
+}
+
+/**
+ * replaceMatchingRunsInTextRange_(textRange, request, counters)
+ *
+ * Replaces font family for each matching run and applies optional size delta.
+ *
+ * Important behavior:
+ * - Match is case-insensitive based on normalized font-family key
+ * - Size delta is applied only after a run was successfully font-replaced
+ * - Resulting size is clamped to >= 1 point
+ *
+ * @param {TextRange} textRange - Shape or table-cell text range
+ * @param {Object} request - Normalized replacement options
+ * @param {Object} counters - Mutable operation counters
+ */
+function replaceMatchingRunsInTextRange_(textRange, request, counters) {
+  const runs = safeGet_(function () { return textRange.getRuns(); }) || [];
+
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    counters.runsScanned += 1;
+
+    const style = safeGet_(function () { return run.getTextStyle(); });
+    if (!style) {
+      continue;
+    }
+
+    const runFont = safeGet_(function () { return style.getFontFamily(); });
+    const runFontKey = normalizeFontFamily_(runFont);
+    if (!runFontKey || runFontKey !== request.sourceKey) {
+      continue;
+    }
+
+    counters.runsMatched += 1;
+
+    try {
+      style.setFontFamily(request.targetFont);
+      counters.runsReplaced += 1;
+    } catch (e) {
+      counters.failures += 1;
+      continue;
+    }
+
+    // Apply size change only for replaced runs and only when delta is non-zero.
+    if (request.sizeDelta === 0) {
+      continue;
+    }
+
+    const currentSize = safeGet_(function () { return style.getFontSize(); });
+    if (typeof currentSize !== 'number' || isNaN(currentSize)) {
+      continue;
+    }
+
+    const nextSize = Math.max(1, currentSize + request.sizeDelta);
+    try {
+      style.setFontSize(nextSize);
+      counters.runsSizeAdjusted += 1;
+    } catch (e) {
+      counters.failures += 1;
+    }
+  }
+}
+
+/**
+ * showReplaceFontDialog()
+ *
+ * Opens the Replace Font UI as a Google Slides modal dialog that floats above
+ * the slide canvas. This avoids sidebar layout constraints and gives the form
+ * enough space for readable controls.
+ *
+ * Note:
+ * - The actual replacement logic remains in replaceFontInPresentation(...)
+ * - The dialog HTML calls getReplaceFontDialogData() and replaceFontInPresentation(...)
+ *   directly via google.script.run
+ */
+function showReplaceFontDialog() {
+  const htmlOutput = HtmlService
+    .createHtmlOutputFromFile('ReplaceFontDialog')
+    .setWidth(460)
+    .setHeight(560);
+
+  SlidesApp.getUi().showModalDialog(htmlOutput, 'Replace Font');
+  return '';
+}
+
+// ============================================================================
+// BULK RECOLOR
+// ============================================================================
+
+/**
+ * resolveHexFromColor_(colorObj)
+ *
+ * Extracts a normalized uppercase hex string (e.g. "#FF0000") from a Google
+ * Slides Color object.  Handles both RGB and Theme color types.  Returns null
+ * when the color cannot be resolved (e.g. unresolvable theme color).
+ *
+ * @param {Color} colorObj  A Color returned by getForegroundColor(), etc.
+ * @returns {string|null}   Uppercase hex like "#RRGGBB", or null.
+ */
+function resolveHexFromColor_(colorObj) {
+  if (!colorObj) return null;
+
+  var colorType = safeGet_(function () { return colorObj.getColorType(); });
+
+  if (colorType === SlidesApp.ColorType.RGB) {
+    var rgb = safeGet_(function () { return colorObj.asRgbColor(); });
+    if (!rgb) return null;
+    var hex = safeGet_(function () { return rgb.asHexString(); });
+    return hex ? hex.toUpperCase() : null;
+  }
+
+  if (colorType === SlidesApp.ColorType.THEME) {
+    // Theme colors sometimes resolve to RGB via asRgbColor(); try it safely.
+    var resolvedRgb = safeGet_(function () { return colorObj.asRgbColor(); });
+    if (resolvedRgb) {
+      var resolvedHex = safeGet_(function () { return resolvedRgb.asHexString(); });
+      return resolvedHex ? resolvedHex.toUpperCase() : null;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Color collection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * collectColorsFromPageElement_(element, colorSets)
+ *
+ * Recursively traverses a page element and records every solid color it finds
+ * into the appropriate map inside colorSets.
+ *
+ * @param {PageElement} element
+ * @param {{ fontColorMap: Object, fillColorMap: Object, outlineColorMap: Object }} colorSets
+ */
+function collectColorsFromPageElement_(element, colorSets) {
+  var type = safeGet_(function () { return element.getPageElementType(); });
+
+  // GROUP — recurse into children
+  if (type === SlidesApp.PageElementType.GROUP) {
+    var children = safeGet_(function () { return element.asGroup().getChildren(); }) || [];
+    for (var c = 0; c < children.length; c++) {
+      collectColorsFromPageElement_(children[c], colorSets);
+    }
+    return;
+  }
+
+  // SHAPE — fill, outline, and text-foreground colors
+  if (type === SlidesApp.PageElementType.SHAPE) {
+    var shape = safeGet_(function () { return element.asShape(); });
+    if (!shape) return;
+
+    collectFillColor_(shape, colorSets.fillColorMap);
+    collectOutlineColor_(shape, colorSets.outlineColorMap);
+
+    var textRange = safeGet_(function () { return shape.getText(); });
+    collectTextForegroundColors_(textRange, colorSets.fontColorMap);
+    return;
+  }
+
+  // TABLE — cell fill + cell text-foreground colors
+  if (type === SlidesApp.PageElementType.TABLE) {
+    var table = safeGet_(function () { return element.asTable(); });
+    if (!table) return;
+
+    var numRows = safeGet_(function () { return table.getNumRows(); }) || 0;
+    var numCols = safeGet_(function () { return table.getNumColumns(); }) || 0;
+
+    for (var row = 0; row < numRows; row++) {
+      for (var col = 0; col < numCols; col++) {
+        (function (r, c) {
+          var cell = safeGet_(function () { return table.getCell(r, c); });
+          if (!cell) return;
+
+          collectCellFillColor_(cell, colorSets.fillColorMap);
+
+          var cellText = safeGet_(function () { return cell.getText(); });
+          collectTextForegroundColors_(cellText, colorSets.fontColorMap);
+        })(row, col);
+      }
+    }
+  }
+}
+
+/**
+ * collectFillColor_(shape, fillColorMap)
+ *
+ * Records the shape's solid-fill color (if any) into fillColorMap.
+ */
+function collectFillColor_(shape, fillColorMap) {
+  var fill = safeGet_(function () { return shape.getFill(); });
+  if (!fill) return;
+
+  var solidFill = safeGet_(function () { return fill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var hex = resolveHexFromColor_(colorObj);
+  if (hex) fillColorMap[hex] = true;
+}
+
+/**
+ * collectOutlineColor_(shape, outlineColorMap)
+ *
+ * Records the shape's border/outline solid color (if any) into outlineColorMap.
+ */
+function collectOutlineColor_(shape, outlineColorMap) {
+  var border = safeGet_(function () { return shape.getBorder(); });
+  if (!border) return;
+
+  var lineFill = safeGet_(function () { return border.getLineFill(); });
+  if (!lineFill) return;
+
+  var solidFill = safeGet_(function () { return lineFill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var hex = resolveHexFromColor_(colorObj);
+  if (hex) outlineColorMap[hex] = true;
+}
+
+/**
+ * collectCellFillColor_(cell, fillColorMap)
+ *
+ * Records a table cell's solid-fill color (if any) into fillColorMap.
+ */
+function collectCellFillColor_(cell, fillColorMap) {
+  var fill = safeGet_(function () { return cell.getFill(); });
+  if (!fill) return;
+
+  var solidFill = safeGet_(function () { return fill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var hex = resolveHexFromColor_(colorObj);
+  if (hex) fillColorMap[hex] = true;
+}
+
+/**
+ * collectTextForegroundColors_(textRange, fontColorMap)
+ *
+ * Iterates text runs within textRange and records each foreground color found.
+ */
+function collectTextForegroundColors_(textRange, fontColorMap) {
+  if (!textRange) return;
+
+  var runs = safeGet_(function () { return textRange.getRuns(); }) || [];
+  for (var i = 0; i < runs.length; i++) {
+    var run = runs[i];
+    var style = safeGet_(function () { return run.getTextStyle(); });
+    if (!style) continue;
+
+    var colorObj = safeGet_(function () { return style.getForegroundColor(); });
+    var hex = resolveHexFromColor_(colorObj);
+    if (hex) fontColorMap[hex] = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scanning entry-point
+// ---------------------------------------------------------------------------
+
+/**
+ * getBulkRecolorDialogData()
+ *
+ * Scans all slides in the active presentation and returns an inventory of
+ * unique solid colors grouped by category (font, fill, outline).
+ *
+ * @returns {{ fontColors: string[], fillColors: string[], outlineColors: string[] }}
+ */
+function getBulkRecolorDialogData() {
+  var presentation = SlidesApp.getActivePresentation();
+  var allSlides = presentation.getSlides();
+
+  var colorSets = {
+    fontColorMap: {},
+    fillColorMap: {},
+    outlineColorMap: {}
+  };
+
+  for (var s = 0; s < allSlides.length; s++) {
+    var slide = allSlides[s];
+    var elements = safeGet_(function () { return slide.getPageElements(); }) || [];
+    for (var i = 0; i < elements.length; i++) {
+      collectColorsFromPageElement_(elements[i], colorSets);
+    }
+  }
+
+  return {
+    fontColors: Object.keys(colorSets.fontColorMap).sort(),
+    fillColors: Object.keys(colorSets.fillColorMap).sort(),
+    outlineColors: Object.keys(colorSets.outlineColorMap).sort()
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Replacement helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * normalizeColorMap_(map)
+ *
+ * Returns a new object with uppercase hex keys.  Entries where old === new
+ * (after normalization) are filtered out since no change is needed.
+ *
+ * @param {Object} map  { "#aabb00": "#CCDDEE", ... }
+ * @returns {Object}    Normalized copy.
+ */
+function normalizeColorMap_(map) {
+  var normalized = {};
+  var keys = Object.keys(map);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i].toUpperCase();
+    var val = map[keys[i]].toUpperCase();
+    if (key !== val) {
+      normalized[key] = val;
+    }
+  }
+  return normalized;
+}
+
+/**
+ * processPageElementForRecolor_(element, request, counters)
+ *
+ * Recursive traversal that applies color replacements for fill, outline,
+ * and text-foreground per the maps in request.
+ */
+function processPageElementForRecolor_(element, request, counters) {
+  var type = safeGet_(function () { return element.getPageElementType(); });
+
+  // GROUP — recurse
+  if (type === SlidesApp.PageElementType.GROUP) {
+    var children = safeGet_(function () { return element.asGroup().getChildren(); }) || [];
+    for (var c = 0; c < children.length; c++) {
+      processPageElementForRecolor_(children[c], request, counters);
+    }
+    return;
+  }
+
+  // SHAPE
+  if (type === SlidesApp.PageElementType.SHAPE) {
+    var shape = safeGet_(function () { return element.asShape(); });
+    if (!shape) return;
+
+    recolorShapeFill_(shape, request.fillMap, counters);
+    recolorShapeOutline_(shape, request.outlineMap, counters);
+
+    var textRange = safeGet_(function () { return shape.getText(); });
+    recolorTextForeground_(textRange, request.fontMap, counters);
+    return;
+  }
+
+  // TABLE
+  if (type === SlidesApp.PageElementType.TABLE) {
+    var table = safeGet_(function () { return element.asTable(); });
+    if (!table) return;
+
+    var numRows = safeGet_(function () { return table.getNumRows(); }) || 0;
+    var numCols = safeGet_(function () { return table.getNumColumns(); }) || 0;
+
+    for (var row = 0; row < numRows; row++) {
+      for (var col = 0; col < numCols; col++) {
+        (function (r, c) {
+          var cell = safeGet_(function () { return table.getCell(r, c); });
+          if (!cell) return;
+
+          recolorCellFill_(cell, request.fillMap, counters);
+
+          var cellText = safeGet_(function () { return cell.getText(); });
+          recolorTextForeground_(cellText, request.fontMap, counters);
+        })(row, col);
+      }
+    }
+  }
+}
+
+/**
+ * recolorShapeFill_(shape, fillMap, counters)
+ *
+ * Replaces the shape's solid fill color if it matches an entry in fillMap.
+ */
+function recolorShapeFill_(shape, fillMap, counters) {
+  if (Object.keys(fillMap).length === 0) return;
+
+  var fill = safeGet_(function () { return shape.getFill(); });
+  if (!fill) return;
+
+  var solidFill = safeGet_(function () { return fill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var currentHex = resolveHexFromColor_(colorObj);
+  if (!currentHex) return;
+
+  var newHex = fillMap[currentHex];
+  if (!newHex) return;
+
+  try {
+    fill.setSolidFill(newHex);
+    counters.fillColorsReplaced += 1;
+  } catch (e) {
+    counters.failures += 1;
+  }
+}
+
+/**
+ * recolorShapeOutline_(shape, outlineMap, counters)
+ *
+ * Replaces the shape's border/outline color if it matches an entry in outlineMap.
+ */
+function recolorShapeOutline_(shape, outlineMap, counters) {
+  if (Object.keys(outlineMap).length === 0) return;
+
+  var border = safeGet_(function () { return shape.getBorder(); });
+  if (!border) return;
+
+  var lineFill = safeGet_(function () { return border.getLineFill(); });
+  if (!lineFill) return;
+
+  var solidFill = safeGet_(function () { return lineFill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var currentHex = resolveHexFromColor_(colorObj);
+  if (!currentHex) return;
+
+  var newHex = outlineMap[currentHex];
+  if (!newHex) return;
+
+  try {
+    lineFill.setSolidFill(newHex);
+    counters.outlineColorsReplaced += 1;
+  } catch (e) {
+    counters.failures += 1;
+  }
+}
+
+/**
+ * recolorCellFill_(cell, fillMap, counters)
+ *
+ * Replaces a table cell's solid fill color if it matches an entry in fillMap.
+ */
+function recolorCellFill_(cell, fillMap, counters) {
+  if (Object.keys(fillMap).length === 0) return;
+
+  var fill = safeGet_(function () { return cell.getFill(); });
+  if (!fill) return;
+
+  var solidFill = safeGet_(function () { return fill.getSolidFill(); });
+  if (!solidFill) return;
+
+  var colorObj = safeGet_(function () { return solidFill.getColor(); });
+  var currentHex = resolveHexFromColor_(colorObj);
+  if (!currentHex) return;
+
+  var newHex = fillMap[currentHex];
+  if (!newHex) return;
+
+  try {
+    fill.setSolidFill(newHex);
+    counters.fillColorsReplaced += 1;
+  } catch (e) {
+    counters.failures += 1;
+  }
+}
+
+/**
+ * recolorTextForeground_(textRange, fontMap, counters)
+ *
+ * Iterates text runs in textRange and replaces foreground colors that match
+ * entries in fontMap.
+ */
+function recolorTextForeground_(textRange, fontMap, counters) {
+  if (!textRange) return;
+  if (Object.keys(fontMap).length === 0) return;
+
+  var runs = safeGet_(function () { return textRange.getRuns(); }) || [];
+  for (var i = 0; i < runs.length; i++) {
+    var run = runs[i];
+    var style = safeGet_(function () { return run.getTextStyle(); });
+    if (!style) continue;
+
+    var colorObj = safeGet_(function () { return style.getForegroundColor(); });
+    var currentHex = resolveHexFromColor_(colorObj);
+    if (!currentHex) continue;
+
+    var newHex = fontMap[currentHex];
+    if (!newHex) continue;
+
+    try {
+      style.setForegroundColor(newHex);
+      counters.fontColorsReplaced += 1;
+    } catch (e) {
+      counters.failures += 1;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Replacement entry-point
+// ---------------------------------------------------------------------------
+
+/**
+ * bulkRecolorPresentation(request)
+ *
+ * Applies color replacements across the presentation (or selected slides).
+ *
+ * @param {{ scope: string, replacements: { font: Object, fill: Object, outline: Object } }} request
+ * @returns {string} Summary message.
+ */
+function bulkRecolorPresentation(request) {
+  var scope = isValidReplaceScope_(request && request.scope) ? request.scope : 'ENTIRE_PRESENTATION';
+  var replacements = request && request.replacements ? request.replacements : {};
+
+  var fontMap = normalizeColorMap_(replacements.font || {});
+  var fillMap = normalizeColorMap_(replacements.fill || {});
+  var outlineMap = normalizeColorMap_(replacements.outline || {});
+
+  var hasFontReplacements = Object.keys(fontMap).length > 0;
+  var hasFillReplacements = Object.keys(fillMap).length > 0;
+  var hasOutlineReplacements = Object.keys(outlineMap).length > 0;
+
+  if (!hasFontReplacements && !hasFillReplacements && !hasOutlineReplacements) {
+    return 'No color replacements specified.';
+  }
+
+  var scopeResult = resolveSlidesForReplaceScope_(scope);
+  if (scopeResult.error) {
+    return scopeResult.error;
+  }
+
+  var slides = scopeResult.slides;
+  if (!slides || slides.length === 0) {
+    return 'No slides found for the selected scope.';
+  }
+
+  var counters = {
+    slidesScanned: slides.length,
+    fontColorsReplaced: 0,
+    fillColorsReplaced: 0,
+    outlineColorsReplaced: 0,
+    failures: 0
+  };
+
+  var recolorRequest = {
+    fontMap: fontMap,
+    fillMap: fillMap,
+    outlineMap: outlineMap
+  };
+
+  for (var s = 0; s < slides.length; s++) {
+    var slide = slides[s];
+    var pageElements = safeGet_(function () { return slide.getPageElements(); }) || [];
+    for (var i = 0; i < pageElements.length; i++) {
+      processPageElementForRecolor_(pageElements[i], recolorRequest, counters);
+    }
+  }
+
+  // Build summary
+  var parts = [];
+  if (counters.fontColorsReplaced > 0) {
+    parts.push(counters.fontColorsReplaced + ' font color(s)');
+  }
+  if (counters.fillColorsReplaced > 0) {
+    parts.push(counters.fillColorsReplaced + ' fill(s)');
+  }
+  if (counters.outlineColorsReplaced > 0) {
+    parts.push(counters.outlineColorsReplaced + ' outline(s)');
+  }
+
+  if (parts.length === 0) {
+    return 'No matching colors found in the selected scope.';
+  }
+
+  var message = 'Replaced ' + parts.join(', ') + ' across ' + counters.slidesScanned + ' slide(s).';
+  if (counters.failures > 0) {
+    message += ' ' + counters.failures + ' update(s) could not be applied.';
+  }
+  return message;
+}
+
+// ---------------------------------------------------------------------------
+// Dialog opener
+// ---------------------------------------------------------------------------
+
+/**
+ * showBulkRecolorDialog()
+ *
+ * Opens the Bulk Recolor UI as a Google Slides modal dialog.
+ */
+function showBulkRecolorDialog() {
+  var htmlOutput = HtmlService
+    .createHtmlOutputFromFile('BulkRecolorDialog')
+    .setWidth(580)
+    .setHeight(640);
+
+  SlidesApp.getUi().showModalDialog(htmlOutput, 'Bulk Recolor');
+  return '';
 }
 
 // ============================================================================

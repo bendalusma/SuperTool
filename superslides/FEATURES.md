@@ -15,6 +15,7 @@ SuperSlides is a Google Slides add-on that provides precise layout tools for ali
    - [Align Middle](#align-middle)
 2. [Position Manipulation](#position-manipulation)
    - [Swap Positions](#swap-positions)
+   - [Matrix Alignment](#matrix-alignment)
 3. [Distribution](#distribution)
    - [Distribute Horizontally](#distribute-horizontally)
    - [Distribute Vertically](#distribute-vertically)
@@ -27,34 +28,37 @@ SuperSlides is a Google Slides add-on that provides precise layout tools for ali
    - [Align in Table](#align-in-table)
    - [Swap Rows in Table](#swap-rows-in-table)
    - [Swap Columns in Table](#swap-columns-in-table)
-6. [Matrix Alignment](#matrix-alignment)
-7. [Slide Layout](#slide-layout)
+   - [Transpose Table](#transpose-table)
+   - [Sort Table](#sort-table)
+6. [Slide Layout](#slide-layout)
    - [Insert 2 Columns](#insert-2-columns)
    - [Insert 3 Columns](#insert-3-columns)
    - [Insert 4 Columns](#insert-4-columns)
    - [Insert Footnote](#insert-footnote)
-8. [Size Manipulation](#size-manipulation)
+7. [Size Manipulation](#size-manipulation)
    - [Align Width](#align-width)
    - [Align Height](#align-height)
    - [Align Both](#align-both)
-9. [Stretch Objects](#stretch-objects)
+8. [Stretch Objects](#stretch-objects)
    - [Stretch Left](#stretch-left)
    - [Stretch Right](#stretch-right)
    - [Stretch Top](#stretch-top)
    - [Stretch Bottom](#stretch-bottom)
-10. [Fill Space](#fill-space)
+9. [Fill Space](#fill-space)
    - [Fill Left](#fill-left)
    - [Fill Right](#fill-right)
    - [Fill Top](#fill-top)
    - [Fill Bottom](#fill-bottom)
-11. [Magic Resizer](#magic-resizer)
-12. [Anchor Management](#anchor-management)
+10. [Magic Resizer](#magic-resizer)
+11. [Replace Font](#replace-font)
+12. [Bulk Recolor](#bulk-recolor)
+13. [Anchor Management](#anchor-management)
    - [Set Anchor](#set-anchor)
    - [Clear Anchor](#clear-anchor)
    - [Anchor Status](#anchor-status)
-13. [How Anchor Resolution Works](#how-anchor-resolution-works)
-14. [API Reference](#api-reference)
-15. [Known Limitations](#known-limitations)
+14. [How Anchor Resolution Works](#how-anchor-resolution-works)
+15. [API Reference](#api-reference)
+16. [Known Limitations](#known-limitations)
 
 ---
 
@@ -740,10 +744,89 @@ Swaps two columns in a selected table by column index (1-based). Supports the sa
 
 ---
 
+### Transpose Table
+
+**What it does:**  
+Transposes the selected table and **replaces it in place by default**. You can optionally do the replacement on a duplicated slide.
+
+**How to use:**
+
+1. Select a table on the current slide
+2. Click **Transpose Table**
+3. Choose options:
+   - **Transpose header row** (default: ON)
+   - **Keep source formatting** (default: ON)
+   - **Slot transposed table in a new slide** (default: OFF)
+4. Click **Apply**
+
+**Modes:**
+
+- **Transpose header row = ON:**
+  - Full transpose `R × C -> C × R`
+- **Transpose header row = OFF:**
+  - Header row stays at top
+  - Only body rows are transposed and placed below header
+- **Slot transposed table in a new slide = OFF (default):**
+  - Source table is replaced in place on current slide
+- **Slot transposed table in a new slide = ON:**
+  - Current slide is duplicated
+  - Source table is replaced on duplicated slide
+  - Original slide remains unchanged
+
+**Technical details:**
+
+- Uses existing table resolution helper (`getSelectedTableForSwap_()`)
+- Transposed table is inserted in the exact original table slot (same left/top)
+- Source table is removed after successful content transfer
+- `Keep source formatting` transfers text styles, paragraph styles, cell fill, and content alignment
+- Border transfer is not supported in current Apps Script flow
+- Merged-cell transpose is blocked with explicit error
+
+---
+
+### Sort Table
+
+**What it does:**  
+Sorts table rows like Excel/Sheets with row 1 fixed as header. Sorting applies to data rows only.
+
+**How to use:**
+
+1. Select a table on the current slide
+2. Click **Sort Table**
+3. Set:
+   - **Sort by column** (1-based)
+   - **Order** (Ascending or Descending)
+   - **Keep source formatting** (default: ON)
+4. Click **Apply**
+
+**Sort rules:**
+
+- Row 1 is always treated as header and never moved
+- Single-key sort (selected column)
+- Blank keys are always sorted last
+- Key type auto-detection order:
+  - number
+  - date
+  - text
+- If type differs between values, fallback is case-insensitive text compare
+- Stable tie-break uses original row order
+
+**Technical details:**
+
+- Captures row payloads first, then rewrites sorted order back to rows 2..N
+- `Keep source formatting` moves row values and formatting together
+- Merged-cell sort is blocked with explicit error
+- Border transfer is not supported in current Apps Script flow
+
+---
+
 ## Matrix Alignment
 
 **What it does:**  
 Arranges selected shapes into a grid/matrix layout with user-specified dimensions and spacing.
+
+**Where it lives in the UI:**  
+Sidebar → **Position & Alignment** → **Arrange in Matrix** (opens a popup for settings)
 
 **Visual example:**
 
@@ -758,9 +841,9 @@ BEFORE:                         AFTER (3×3 matrix):
 **How to use:**
 
 1. Select the shapes you want to arrange (maintains selection order)
-2. Specify desired rows and columns (e.g., 3 rows, 3 columns)
-3. Specify spacing between shapes (default: 20 points)
-4. Click **Arrange in Matrix**
+2. Click **Arrange in Matrix** in the **Position & Alignment** section
+3. In the popup, specify desired rows and columns (e.g., 3 rows, 3 columns)
+4. In the popup, specify spacing between shapes (default: 20 points) and click **Apply**
 
 **Auto-expansion:**
 
@@ -1595,6 +1678,117 @@ BEFORE (100%):                  AFTER (150%):
 
 ---
 
+## Replace Font
+
+Replace Font is a text utility that finds a specific font family in presentation text runs and replaces it with another font family. It can optionally increase or decrease the point size of replaced runs.
+
+**What it does:**  
+Opens a **Google Slides modal dialog** (on top of the slide canvas) where you choose a source font, target font, size delta, text restrictions, and slide scope, then applies replacement in one operation.
+
+**Dialog fields:**
+
+- **Replace font**: Dropdown of unique font families detected in the presentation
+- **With font**: Curated dropdown of common target fonts plus **Custom...** option
+- **Change size by (pt)**: Integer delta; negative decreases size, positive increases size, `0` leaves size unchanged
+- **Restrict to**:
+  - `All Text` (default): process shapes and tables
+  - `Text in Shapes`: process shape text only
+  - `Text in Tables`: process table-cell text only
+- **Replace in**:
+  - `Entire Presentation` (default)
+  - `Selected Slides` (uses selected thumbnails when available; otherwise current slide)
+
+**How to use:**
+
+1. Click **Replace Font** in the sidebar
+2. Choose the source font to find
+3. Choose the target font (or select **Custom...** and type a font family)
+4. Set **Change size by** if needed (default `0`)
+5. Choose **Restrict to** and **Replace in** scope
+6. Click **Replace**
+7. Review the bold summary message, then click **Done** to close the dialog
+
+**Technical details:**
+
+- Matching is case-insensitive on font family names
+- Only text runs that match the source font are changed
+- Size delta applies only to runs that were actually replaced
+- New size is clamped to a minimum of `1pt` to prevent invalid values
+- Grouped elements are traversed recursively, so text inside grouped shapes is included
+- Operation summary reports replaced run count, size-adjusted run count, and failures
+- Summary message is shown in bold for clear confirmation
+- Dialog stays open after replace and closes only when user clicks **Done**
+
+---
+
+## Bulk Recolor
+
+**What it does:**
+Opens a modal dialog that scans the entire presentation for all solid colors and lets you remap them. Colors are categorized into **Font** (text foreground), **Fill** (shape/cell background), and **Outline** (shape border) with independent replacement control per category.
+
+**Visual example:**
+
+```
++-----------------------------------------------------------+
+|  Bulk Recolor                                             |
+|                                                           |
+|  Replace in: [Entire Presentation]                        |
+|                                                           |
+|  [All] [Font] [Fill] [Outline]          ← category tabs   |
+|                                                           |
+|  ┌─────────────────────────────────────────────────────┐  |
+|  │ Current Color           │ Replace with              │  |
+|  ├─────────────────────────┼──────────────────────────-┤  |
+|  │ [██] #FF0000  font,fill │ [color picker] [x]        │  |
+|  │ [██] #0000FF  font      │ [color picker]             │  |
+|  │ [██] #333333  outline   │ [color picker]             │  |
+|  └─────────────────────────────────────────────────────┘  |
+|                                                           |
+|  Status: 15 unique color(s) found.                        |
+|                              [Done]  [Replace]            |
++-----------------------------------------------------------+
+```
+
+**How to use:**
+
+1. Click **Bulk Recolor** in the sidebar (under **Super Formatting Tools**)
+2. The dialog opens and scans all slides for colors
+3. Use the category tabs to filter by **Font**, **Fill**, or **Outline** (or view **All**)
+4. For each color you want to change, click its color picker and choose the new color
+5. Select scope: **Entire Presentation** or **Selected Slides**
+6. Click **Replace** to apply changes
+7. Review the summary message, then click **Done** to close
+
+**Category-independent replacements:**
+
+- Each category tab (Font, Fill, Outline) maintains **independent** replacement picks
+- Changing red→blue on the **Font** tab does NOT affect red fills
+- The **All** tab applies replacements to every category where the color appears
+- This lets you remap font colors and fill colors separately for the same hex value
+
+**Technical details:**
+
+- Scans all slides for color inventory; scope (all vs selected) applies only at replacement time
+- Font colors: reads `TextStyle.getForegroundColor()` from text runs in shapes and table cells
+- Fill colors: reads `Shape.getFill().getSolidFill()` and `TableCell.getFill().getSolidFill()`
+- Outline colors: reads `Shape.getBorder().getLineFill().getSolidFill()`
+- Colors are normalized to uppercase hex (e.g., `#FF0000`) for consistent matching
+- Theme colors are resolved to RGB where possible; unresolvable theme colors are skipped
+- Grouped elements are traversed recursively
+- Transparent, gradient, and no-fill elements are skipped (only solid fills are detected)
+- Operation summary reports replaced counts per category and failures
+- Dialog stays open after replace; user clicks **Done** to close
+
+**Known limitations:**
+
+- Only solid colors are detected — gradients and pattern fills are skipped
+- Theme colors that cannot be resolved to RGB are not shown in the inventory
+- Lines and connectors are not currently scanned (shapes and tables only)
+- Table cell borders are not exposed by the Apps Script API for color reading
+- Very large presentations may take several seconds to scan all colors
+
+---
+
 ## Anchor Management
 
 The "anchor" is the reference shape that other shapes align to. SuperSlides provides explicit anchor control so you always know which shape is the reference.
@@ -1716,6 +1910,8 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `alignToTable(alignment, padding)` | `string`, `number` | `string` | Aligns shapes within table cells |
 | `swapTableRows(rowA, rowB, keepFormatting)` | `number`, `number`, `boolean` | `string` | Swaps two table rows (optionally preserving source formatting) |
 | `swapTableColumns(colA, colB, keepFormatting)` | `number`, `number`, `boolean` | `string` | Swaps two table columns (optionally preserving source formatting) |
+| `transposeTable(transposeHeader, keepFormatting, slotInNewSlide)` | `boolean`, `boolean`, `boolean` | `string` | Replaces selected table with transposed output (current or duplicated slide) |
+| `sortTable(sortColumn, sortOrder, keepFormatting)` | `number`, `string`, `boolean` | `string` | Sorts data rows by one column with header row fixed |
 | `arrangeMatrix(rows, cols, spacing)` | `number`, `number`, `number` | `string` | Arranges shapes in grid layout |
 | `insertTwoColumns()` | — | `string` | Inserts 2-column layout with title and content boxes |
 | `insertThreeColumns()` | — | `string` | Inserts 3-column layout with title and content boxes |
@@ -1732,6 +1928,12 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `fillRight()` | — | `string` | Stretches objects to fill gap to anchor's left edge |
 | `fillTop()` | — | `string` | Stretches objects to fill gap to anchor's bottom edge |
 | `fillBottom()` | — | `string` | Stretches objects to fill gap to anchor's top edge |
+| `getReplaceFontDialogData()` | — | `object` | Returns detected source fonts + curated target font list for Replace Font dialog |
+| `replaceFontInPresentation(request)` | `object` | `string` | Replaces matching font runs with optional size delta and scope/restrict filters |
+| `showReplaceFontDialog()` | — | `string` | Opens Replace Font as a Slides modal dialog |
+| `getBulkRecolorDialogData()` | — | `object` | Returns detected font/fill/outline colors for Bulk Recolor dialog |
+| `bulkRecolorPresentation(request)` | `object` | `string` | Replaces matching colors per category with optional scope filter |
+| `showBulkRecolorDialog()` | — | `string` | Opens Bulk Recolor as a Slides modal dialog |
 | `showMagicResizerDialog()` | — | `string` | Opens dialog for percentage-based resizing |
 | `applyMagicResize(percentage)` | `number` | `string` | Scales selected objects by percentage factor |
 
@@ -1761,6 +1963,12 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `showTableSwapDialog(mode)` | Shows row/column swap dialog and configures labels |
 | `hideTableSwapDialog()` | Hides the row/column swap dialog |
 | `runTableSwap()` | Reads indexes + formatting checkbox, calls `swapTableRows()` or `swapTableColumns()` |
+| `showTableTransposeDialog()` | Shows transpose options dialog |
+| `hideTableTransposeDialog()` | Hides transpose options dialog |
+| `runTransposeTable()` | Reads transpose options + new-slide checkbox, calls `transposeTable()` |
+| `showTableSortDialog()` | Shows table sort options dialog |
+| `hideTableSortDialog()` | Hides table sort options dialog |
+| `runSortTable()` | Reads sort settings, calls `sortTable()` |
 | `runArrangeMatrix()` | Gets rows/cols/spacing, calls `arrangeMatrix()`, shows result |
 | `runInsertTwoColumns()` | Shows "Inserting...", calls `insertTwoColumns()`, shows result |
 | `runInsertThreeColumns()` | Shows "Inserting...", calls `insertThreeColumns()`, shows result |
@@ -1777,6 +1985,8 @@ When you perform an alignment operation, SuperSlides needs to determine which sh
 | `runFillRight()` | Shows "Filling right...", calls `fillRight()`, shows result |
 | `runFillTop()` | Shows "Filling top...", calls `fillTop()`, shows result |
 | `runFillBottom()` | Shows "Filling bottom...", calls `fillBottom()`, shows result |
+| `runOpenReplaceFontDialog()` | Opens Replace Font as a Slides modal dialog (not constrained to sidebar width) |
+| `runOpenBulkRecolorDialog()` | Opens Bulk Recolor as a Slides modal dialog for color remapping |
 | `runMagicResizer()` | Shows "Opening...", calls `showMagicResizerDialog()`, shows result |
 
 ---
@@ -1820,6 +2030,15 @@ Certain element types (like embedded videos or linked objects) may not support `
   - If exactly one table is selected, that table is used.
   - If no table is selected but exactly one table exists on current slide, that table is used.
   - Otherwise, user must select a single target table.
+
+### Table Transpose and Sort Limitations
+
+- **Border transfer not supported**: Text and cell-level styles can move with content, but border transfer is out of scope in the current Apps Script approach.
+- **Merged cells not supported**:
+  - Transpose blocks when merged cells are found in source.
+  - Sort blocks when merged cells are found in data rows.
+- **Sort scope**: Current implementation is single-key sort only (one selected column).
+- **Sort header behavior**: Row 1 is always fixed and never part of sorted data rows.
 
 ### Matrix Alignment Limitations
 
@@ -1929,6 +2148,15 @@ Certain element types (like embedded videos or linked objects) may not support `
 - Very small percentages (< 5%) may create nearly invisible objects
 - Very large percentages (> 500%) may create objects that extend beyond slide bounds
 
+### Replace Font Limitations
+
+- Source-font dropdown only includes fonts currently detected in presentation text runs
+- Target-font dropdown is curated (common fonts), with **Custom...** for non-listed families
+- Fonts with no explicit run-level family value may not be discoverable as source matches
+- Size delta is integer-point based in UI; fractional point deltas are not exposed
+- Very large negative deltas are clamped to `1pt` minimum on replaced runs
+- Some run updates may fail on unsupported/locked content and are reported in summary
+
 ---
 
 ## File Structure
@@ -1937,8 +2165,10 @@ Certain element types (like embedded videos or linked objects) may not support `
 superslides/
 ├── src/
 │   ├── appsscript.json    # Manifest (scopes, runtime)
-│   ├── Code.gs            # Server-side logic (~3331 lines)
-│   └── Sidebar.html       # UI + client-side JS (~1292 lines)
+│   ├── Code.gs            # Server-side logic
+│   ├── Sidebar.html       # Sidebar UI + client-side JS
+│   ├── ReplaceFontDialog.html  # Standalone Slides modal UI for Replace Font
+│   └── BulkRecolorDialog.html  # Standalone Slides modal UI for Bulk Recolor
 └── FEATURES.md            # This documentation
 ```
 

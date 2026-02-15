@@ -117,6 +117,7 @@
       2. Position manipulation (swap)
       3. Distribution (equal spacing)
       4. Docking (touch edges)
+      5. Matrix alignment (grid layout via compact popup)
     -->
     <h4 style="margin-top: 16px; margin-bottom: 8px;">Position & Alignment</h4>
 
@@ -177,6 +178,51 @@
     <button onclick="runDockRight()">Dock Right</button>
     <button onclick="runDockTop()">Dock Top</button>
     <button onclick="runDockBottom()">Dock Bottom</button>
+    
+    <!--
+      MATRIX ALIGNMENT (COMPACT MODAL ENTRY POINT)
+
+      Matrix alignment belongs under Position & Alignment because it is also
+      a geometry/layout operation on selected objects. To keep the sidebar
+      compact, we open a modal for its rows/columns/spacing options instead
+      of showing all numeric inputs inline.
+    -->
+    <button onclick="showMatrixDialog()">Arrange in Matrix</button>
+
+    <!--
+      Modal Dialog for Matrix Alignment
+
+      Keeps matrix controls out of the main sidebar flow to reduce visual
+      clutter while still allowing precise control over:
+      - rows
+      - columns
+      - spacing (points)
+    -->
+    <div id="matrixModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 260px;">
+        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 16px;">Matrix Alignment</h3>
+
+        <div style="margin-bottom: 12px;">
+          <label for="matrixRows" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Rows:</label>
+          <input type="number" id="matrixRows" value="3" min="1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label for="matrixCols" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Columns:</label>
+          <input type="number" id="matrixCols" value="3" min="1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label for="matrixSpacing" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Spacing (points):</label>
+          <input type="number" id="matrixSpacing" value="20" min="0" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="hideMatrixDialog()" style="background: #ddd; color: #333;">Cancel</button>
+          <button onclick="runArrangeMatrix()" style="background: #4285f4; color: white;">Apply</button>
+        </div>
+      </div>
+    </div>
 
     <hr>
 
@@ -198,11 +244,17 @@
       - Swap Columns in Table: exchange contents of two column indices
       - Uses 1-based indexing in UI for user-friendly input
       - Designed to avoid cut/paste workflows that can alter formatting context
+
+      NEW TABLE TOOLS:
+      - Transpose Table: create a new transposed table from selected source table
+      - Sort Table: sort data rows while keeping row 1 fixed as header
     -->
     <h4 style="margin-top: 16px; margin-bottom: 8px;">Table Alignment</h4>
     <button onclick="showTableAlignDialog()">Align in Table</button>
     <button onclick="showTableSwapDialog('row')">Swap Rows in Table</button>
     <button onclick="showTableSwapDialog('column')">Swap Columns in Table</button>
+    <button onclick="showTableTransposeDialog()">Transpose Table</button>
+    <button onclick="showTableSortDialog()">Sort Table</button>
     
     <!-- Modal Dialog for Table Alignment -->
     <div id="tableAlignModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
@@ -280,31 +332,91 @@
       </div>
     </div>
 
-    <hr>
+    <!--
+      Modal Dialog for Table Transpose
 
-    <!-- 
-      MATRIX ALIGNMENT CONTROLS
-      
-      Arranges selected shapes into a grid/matrix layout.
-      User should:
-      1. Select shapes to arrange
-      2. Specify desired rows and columns
-      3. Specify spacing between shapes
-      4. Click "Arrange in Matrix"
-      
-      Features:
-      - Auto-expands dimensions if shapes don't fit (e.g., 10 shapes in 3x3 → 4x3)
-      - Maintains selection order (shapes not sorted by position)
-      - Uses selection bounds as reference area
+      Creates a new table (source remains unchanged).
+      User can choose:
+      - Whether header row participates in transpose
+      - Whether source formatting travels with content
     -->
-    <h4 style="margin-top: 16px; margin-bottom: 8px;">Matrix Alignment</h4>
-    <label for="matrixRows" style="font-size: 12px; color: #666;">Rows:</label>
-    <input type="number" id="matrixRows" value="3" min="1" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
-    <label for="matrixCols" style="font-size: 12px; color: #666;">Columns:</label>
-    <input type="number" id="matrixCols" value="3" min="1" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
-    <label for="matrixSpacing" style="font-size: 12px; color: #666;">Spacing (points):</label>
-    <input type="number" id="matrixSpacing" value="20" min="0" style="width: 100%; padding: 4px; margin-bottom: 8px; box-sizing: border-box;">
-    <button onclick="runArrangeMatrix()">Arrange in Matrix</button>
+    <div id="tableTransposeModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 260px;">
+        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 16px;">Transpose Table</h3>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input type="checkbox" id="tableTransposeIncludeHeader" checked>
+            Transpose header row
+          </label>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input type="checkbox" id="tableTransposeKeepFormatting" checked>
+            Keep source formatting
+          </label>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input type="checkbox" id="tableTransposeNewSlide">
+            Slot transposed table in a new slide
+          </label>
+          <div style="margin-top: 4px; font-size: 11px; color: #666;">
+            Default behavior replaces source table in place. Border transfer is not supported.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="hideTableTransposeDialog()" style="background: #ddd; color: #333;">Cancel</button>
+          <button onclick="runTransposeTable()" style="background: #4285f4; color: white;">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!--
+      Modal Dialog for Table Sort
+
+      Spreadsheet-style single-key sort where row 1 is always fixed as header.
+    -->
+    <div id="tableSortModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 260px;">
+        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 16px;">Sort Table</h3>
+
+        <div style="margin-bottom: 12px;">
+          <label for="tableSortColumn" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Sort by column (1-based):</label>
+          <input type="number" id="tableSortColumn" value="1" min="1" style="width: 100%; padding: 6px; box-sizing: border-box; font-size: 13px;">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 6px;">Order:</label>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px;">
+            <input type="radio" name="tableSortOrder" value="asc" checked style="margin-right: 6px;">
+            Ascending
+          </label>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px;">
+            <input type="radio" name="tableSortOrder" value="desc" style="margin-right: 6px;">
+            Descending
+          </label>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input type="checkbox" id="tableSortKeepFormatting" checked>
+            Keep source formatting
+          </label>
+          <div style="margin-top: 4px; font-size: 11px; color: #666;">
+            Row 1 is always treated as header and remains fixed.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="hideTableSortDialog()" style="background: #ddd; color: #333;">Cancel</button>
+          <button onclick="runSortTable()" style="background: #4285f4; color: white;">Apply</button>
+        </div>
+      </div>
+    </div>
 
     <hr>
 
@@ -410,6 +522,24 @@
     <button onclick="runFillRight()">Fill Right</button>
     <button onclick="runFillTop()">Fill Top</button>
     <button onclick="runFillBottom()">Fill Bottom</button>
+
+    <hr>
+
+    <!--
+      SUPER FORMATTING TOOLS SECTION
+
+      This section contains text-focused utilities that mutate typography
+      instead of object geometry. The first utility is "Replace Font", which
+      scans slide text runs and replaces one font family with another.
+
+      Why this is modal-based:
+      - The operation needs multiple options (source font, target font, scope)
+      - We need async data loading (fonts currently used in the presentation)
+      - We want to validate before executing a potentially broad operation
+    -->
+    <h4 style="margin-top: 16px; margin-bottom: 8px;">Super Formatting Tools</h4>
+    <button onclick="runOpenReplaceFontDialog()">Replace Font</button>
+    <button onclick="runOpenBulkRecolorDialog()">Bulk Recolor</button>
 
     <hr>
 
@@ -1015,9 +1145,127 @@
       }
 
       /**
+       * showTableTransposeDialog()
+       *
+       * Shows transpose options modal.
+       */
+      function showTableTransposeDialog() {
+        document.getElementById('tableTransposeModal').style.display = 'block';
+      }
+
+      /**
+       * hideTableTransposeDialog()
+       *
+       * Hides transpose options modal.
+       */
+      function hideTableTransposeDialog() {
+        document.getElementById('tableTransposeModal').style.display = 'none';
+      }
+
+      /**
+       * runTransposeTable()
+       *
+       * Reads transpose options and creates transposed table on server side.
+       */
+      function runTransposeTable() {
+        const transposeHeader = document.getElementById('tableTransposeIncludeHeader').checked;
+        const keepFormatting = document.getElementById('tableTransposeKeepFormatting').checked;
+        const slotInNewSlide = document.getElementById('tableTransposeNewSlide').checked;
+
+        hideTableTransposeDialog();
+        document.getElementById('status').innerText = slotInNewSlide ?
+          'Transposing table on duplicated slide…' :
+          'Transposing table in place…';
+
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Transposed.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .transposeTable(transposeHeader, keepFormatting, slotInNewSlide);
+      }
+
+      /**
+       * showTableSortDialog()
+       *
+       * Shows sort options modal.
+       */
+      function showTableSortDialog() {
+        document.getElementById('tableSortModal').style.display = 'block';
+      }
+
+      /**
+       * hideTableSortDialog()
+       *
+       * Hides sort options modal.
+       */
+      function hideTableSortDialog() {
+        document.getElementById('tableSortModal').style.display = 'none';
+      }
+
+      /**
+       * showMatrixDialog()
+       *
+       * Opens the matrix alignment modal. This keeps the sidebar compact by
+       * moving matrix numeric controls (rows/columns/spacing) into a popup.
+       */
+      function showMatrixDialog() {
+        document.getElementById('matrixModal').style.display = 'block';
+      }
+
+      /**
+       * hideMatrixDialog()
+       *
+       * Closes the matrix alignment modal without applying changes.
+       */
+      function hideMatrixDialog() {
+        document.getElementById('matrixModal').style.display = 'none';
+      }
+
+      /**
+       * runSortTable()
+       *
+       * Reads sort settings and sorts table data rows on server side.
+       */
+      function runSortTable() {
+        const sortColumn = parseInt(document.getElementById('tableSortColumn').value, 10);
+        const keepFormatting = document.getElementById('tableSortKeepFormatting').checked;
+
+        let sortOrder = 'asc';
+        const sortOrderRadios = document.getElementsByName('tableSortOrder');
+        for (let radio of sortOrderRadios) {
+          if (radio.checked) {
+            sortOrder = radio.value;
+            break;
+          }
+        }
+
+        if (!Number.isInteger(sortColumn) || sortColumn < 1) {
+          document.getElementById('status').innerText = '❌ Error: Sort column must be a positive whole number.';
+          return;
+        }
+
+        hideTableSortDialog();
+        document.getElementById('status').innerText = sortOrder === 'desc' ? 'Sorting table (descending)…' : 'Sorting table (ascending)…';
+
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            document.getElementById('status').innerText = msg || 'Sorted.';
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .sortTable(sortColumn, sortOrder, keepFormatting);
+      }
+
+      /**
        * runArrangeMatrix()
        *
-       * Called when user clicks "Arrange in Matrix" button.
+       * Called when user applies settings in the matrix alignment modal.
        * 
        * Arranges selected shapes into a grid/matrix layout with user-specified
        * dimensions and spacing.
@@ -1028,20 +1276,25 @@
        * - Uses selection bounds as reference area
        */
       function runArrangeMatrix() {
-        const rows = parseInt(document.getElementById('matrixRows').value) || 3;
-        const cols = parseInt(document.getElementById('matrixCols').value) || 3;
+        // Read modal values. Fallback defaults keep UX resilient if inputs are blank.
+        const rows = parseInt(document.getElementById('matrixRows').value, 10) || 3;
+        const cols = parseInt(document.getElementById('matrixCols').value, 10) || 3;
         const spacing = parseFloat(document.getElementById('matrixSpacing').value) || 20;
         
-        // Validate inputs
+        // Validate dimensions before sending request to server.
         if (rows <= 0 || cols <= 0) {
           document.getElementById('status').innerText = '❌ Error: Rows and columns must be positive numbers.';
           return;
         }
         
+        // Spacing can be zero, but not negative.
         if (spacing < 0) {
           document.getElementById('status').innerText = '❌ Error: Spacing cannot be negative.';
           return;
         }
+
+        // Close modal only when input is valid and we are ready to run.
+        hideMatrixDialog();
         
         document.getElementById('status').innerText = 'Arranging in matrix…';
         
@@ -1398,6 +1651,55 @@
               '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
           })
           .fillBottom();
+      }
+
+      // ====================================================================
+      // TEXT TOOLS - REPLACE FONT
+      // ====================================================================
+
+      /**
+       * runOpenReplaceFontDialog()
+       *
+       * Opens the Replace Font workflow in a true Slides modal dialog.
+       * This avoids sidebar width constraints, so users can read and interact
+       * with the form comfortably on top of the slide canvas.
+       */
+      function runOpenReplaceFontDialog() {
+        document.getElementById('status').innerText = 'Opening Replace Font dialog…';
+
+        google.script.run
+          .withSuccessHandler(function () {
+            // The dialog handles its own UI and result messaging.
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .showReplaceFontDialog();
+      }
+
+      // ====================================================================
+      // BULK RECOLOR
+      // ====================================================================
+
+      /**
+       * runOpenBulkRecolorDialog()
+       *
+       * Opens the Bulk Recolor workflow in a Slides modal dialog.
+       * Scans colors in the presentation and provides a UI for remapping them.
+       */
+      function runOpenBulkRecolorDialog() {
+        document.getElementById('status').innerText = 'Opening Bulk Recolor dialog\u2026';
+
+        google.script.run
+          .withSuccessHandler(function () {
+            // The dialog handles its own UI and result messaging.
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById('status').innerText =
+              '\u274C Error: ' + (err && err.message ? err.message : JSON.stringify(err));
+          })
+          .showBulkRecolorDialog();
       }
 
       // ====================================================================

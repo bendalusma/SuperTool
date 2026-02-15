@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!--
+      ========================================================================
+      SuperSlides - ReplaceFontDialog.html
+      ========================================================================
+
+      This file powers the standalone Replace Font modal dialog shown on top of
+      Google Slides (outside sidebar width constraints).
+
+      Architecture:
+      - This HTML runs client-side in Apps Script dialog context
+      - It reads options via getReplaceFontDialogData() from Code.gs
+      - It submits replacement via replaceFontInPresentation(request)
+
+      Why this exists:
+      - Sidebar iframes are narrow; complex forms can overflow/truncate
+      - Modal dialog provides predictable width/height for readable controls
+      ========================================================================
+    -->
+    <base target="_top">
+
+    <style>
+      /*
+        Keep styling clean and readable for a utility workflow.
+        Avoid cramped controls so labels and dropdown contents remain visible.
+      */
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 18px;
+        color: #222;
+        background: #fff;
+      }
+
+      h3 {
+        margin: 0 0 14px;
+        font-size: 22px;
+        line-height: 1.2;
+      }
+
+      .field {
+        margin-bottom: 12px;
+      }
+
+      label {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      select,
+      input[type="text"],
+      input[type="number"] {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 16px;
+        line-height: 1.3;
+        padding: 8px 10px;
+        border: 1px solid #9aa0a6;
+        border-radius: 4px;
+        background: #fff;
+      }
+
+      #customTargetFont {
+        margin-top: 8px;
+        display: none;
+      }
+
+      #dialogStatus {
+        min-height: 20px;
+        font-size: 13px;
+        color: #4a4a4a;
+        margin: 4px 0 12px;
+        font-weight: 400;
+      }
+
+      .buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      button {
+        min-width: 110px;
+        padding: 9px 14px;
+        font-size: 15px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+
+      .btn-secondary {
+        background: #f1f3f4;
+        color: #222;
+        border-color: #dadce0;
+      }
+
+      .btn-primary {
+        background: #1a73e8;
+        color: #fff;
+      }
+
+      .btn-done {
+        background: #188038;
+        color: #fff;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h3>Replace Font</h3>
+
+    <div class="field">
+      <label for="sourceFont">Replace font:</label>
+      <select id="sourceFont"></select>
+    </div>
+
+    <div class="field">
+      <label for="targetFont">With font:</label>
+      <select id="targetFont"></select>
+      <input id="customTargetFont" type="text" placeholder="Enter custom font family">
+    </div>
+
+    <div class="field">
+      <label for="sizeDelta">Change size by (pt):</label>
+      <input id="sizeDelta" type="number" step="1" value="0">
+    </div>
+
+    <div class="field">
+      <label for="restrictTo">Restrict to:</label>
+      <select id="restrictTo">
+        <option value="ALL_TEXT" selected>All Text</option>
+        <option value="SHAPES_ONLY">Text in Shapes</option>
+        <option value="TABLES_ONLY">Text in Tables</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="scope">Replace in:</label>
+      <select id="scope">
+        <option value="ENTIRE_PRESENTATION" selected>Entire Presentation</option>
+        <option value="SELECTED_SLIDES">Selected Slides</option>
+      </select>
+    </div>
+
+    <div id="dialogStatus">Loading fonts…</div>
+
+    <div class="buttons">
+      <button id="doneBtn" class="btn-done" type="button" onclick="google.script.host.close()">Done</button>
+      <button id="applyBtn" class="btn-primary" type="button" onclick="runReplaceFont()">Replace</button>
+    </div>
+
+    <script>
+      /**
+       * setStatus(text, makeBold)
+       *
+       * Centralized status updater so every message is rendered consistently.
+       * makeBold=true is used for final/important messages users should review.
+       *
+       * @param {string} text - Message shown in the status row
+       * @param {boolean} makeBold - Whether to emphasize message in bold
+       */
+      function setStatus(text, makeBold) {
+        const statusNode = document.getElementById('dialogStatus');
+        statusNode.innerText = text;
+        statusNode.style.fontWeight = makeBold ? '700' : '400';
+      }
+
+      /**
+       * toggleCustomTargetInput()
+       *
+       * Shows the manual target-font input only when the user selects
+       * "Custom..." in the target dropdown.
+       */
+      function toggleCustomTargetInput() {
+        const targetSelect = document.getElementById('targetFont');
+        const customInput = document.getElementById('customTargetFont');
+
+        if (targetSelect.value === '__CUSTOM__') {
+          customInput.style.display = 'block';
+          customInput.focus();
+        } else {
+          customInput.style.display = 'none';
+          customInput.value = '';
+        }
+      }
+
+      /**
+       * loadDialogData()
+       *
+       * Fetches source fonts detected in the presentation plus curated target
+       * options from Code.gs, then populates dropdowns.
+       */
+      function loadDialogData() {
+        const sourceSelect = document.getElementById('sourceFont');
+        const targetSelect = document.getElementById('targetFont');
+        const applyBtn = document.getElementById('applyBtn');
+
+        setStatus('Loading fonts…', false);
+        applyBtn.disabled = true;
+
+        google.script.run
+          .withSuccessHandler(function (data) {
+            sourceSelect.innerHTML = '';
+            targetSelect.innerHTML = '';
+
+            const sourceFonts = (data && Array.isArray(data.fontsInPresentation)) ? data.fontsInPresentation : [];
+            const targetFonts = (data && Array.isArray(data.targetFontOptions)) ? data.targetFontOptions : [];
+
+            if (sourceFonts.length === 0) {
+              const noSource = document.createElement('option');
+              noSource.value = '';
+              noSource.text = 'No fonts found in presentation';
+              sourceSelect.appendChild(noSource);
+              applyBtn.disabled = true;
+              setStatus('No fonts were detected in presentation text.', true);
+            } else {
+              for (let i = 0; i < sourceFonts.length; i++) {
+                const option = document.createElement('option');
+                option.value = sourceFonts[i];
+                option.text = sourceFonts[i];
+                sourceSelect.appendChild(option);
+              }
+              applyBtn.disabled = false;
+              setStatus('Choose settings, then click Replace.', false);
+            }
+
+            for (let j = 0; j < targetFonts.length; j++) {
+              const targetOption = document.createElement('option');
+              targetOption.value = targetFonts[j];
+              targetOption.text = targetFonts[j];
+              targetSelect.appendChild(targetOption);
+            }
+
+            const customOption = document.createElement('option');
+            customOption.value = '__CUSTOM__';
+            customOption.text = 'Custom...';
+            targetSelect.appendChild(customOption);
+
+            targetSelect.onchange = toggleCustomTargetInput;
+          })
+          .withFailureHandler(function (err) {
+            setStatus('❌ Error loading fonts: ' + (err && err.message ? err.message : JSON.stringify(err)), true);
+          })
+          .getReplaceFontDialogData();
+      }
+
+      /**
+       * runReplaceFont()
+       *
+       * Validates user inputs and submits a single request payload to
+       * replaceFontInPresentation(request). The dialog remains open after
+       * success so users can review the bold result message and explicitly
+       * close the workflow using the Done button.
+       */
+      function runReplaceFont() {
+        const sourceFont = document.getElementById('sourceFont').value;
+        const targetSelection = document.getElementById('targetFont').value;
+        const customTarget = document.getElementById('customTargetFont').value.trim();
+        const restrictTo = document.getElementById('restrictTo').value;
+        const scope = document.getElementById('scope').value;
+        const parsedDelta = parseInt(document.getElementById('sizeDelta').value, 10);
+        const sizeDelta = Number.isInteger(parsedDelta) ? parsedDelta : 0;
+        const applyBtn = document.getElementById('applyBtn');
+        const doneBtn = document.getElementById('doneBtn');
+
+        const targetFont = targetSelection === '__CUSTOM__' ? customTarget : targetSelection;
+
+        if (!sourceFont) {
+          setStatus('❌ Select a source font found in this presentation.', true);
+          return;
+        }
+
+        if (!targetFont) {
+          setStatus('❌ Select or enter a target font.', true);
+          return;
+        }
+
+        applyBtn.disabled = true;
+        setStatus('Replacing font…', false);
+
+        const payload = {
+          sourceFont: sourceFont,
+          targetFont: targetFont,
+          sizeDelta: sizeDelta,
+          restrictTo: restrictTo,
+          scope: scope
+        };
+
+        google.script.run
+          .withSuccessHandler(function (msg) {
+            // Keep dialog open so user can verify the summary before closing.
+            // This mirrors Google Docs find/replace flow where "Done" is explicit.
+            setStatus(msg || 'Font replacement completed.', true);
+            applyBtn.disabled = false;
+            doneBtn.focus();
+          })
+          .withFailureHandler(function (err) {
+            setStatus('❌ Error: ' + (err && err.message ? err.message : JSON.stringify(err)), true);
+            applyBtn.disabled = false;
+          })
+          .replaceFontInPresentation(payload);
+      }
+
+      // Load dropdown data immediately when dialog opens.
+      loadDialogData();
+    </script>
+  </body>
+</html>
